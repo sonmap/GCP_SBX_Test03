@@ -2339,6 +2339,8 @@ Pod 에서 나가는 방향은 환경에 맞게 따로 엽니다 — 로그인 �
 
 ### 4-5. OAuth 값 등록
 
+> **테스트 중에는 건너뜁니다.** `provisioner-env.yaml` 의 `HUB_AUTH_MODE: dummy` 이면 로그인 서버 연동이 꺼져 있고 Secret Manager 를 읽지 않습니다. 실제 연동으로 바꿀 때(`oauth`) 이 절을 수행합니다.
+
 3-13 ~ 3-16 에서 만든 `jupyter-oauth-client-id` · `jupyter-oauth-client-secret` 을 그대로 씁니다. Runner 가 이 값을 과제 Namespace 의 Secret `hub-oauth` 로 복사하고, Hub 설정은 파일로 읽습니다. **값을 저장소 · 요청 JSON · Terraform 변수에 적지 않습니다.**
 
 ```bash

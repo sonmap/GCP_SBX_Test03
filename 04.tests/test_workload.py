@@ -46,6 +46,37 @@ class WorkloadVariableTests(unittest.TestCase):
         self.assertEqual({k for k in running if running[k] != stopped[k]}, {'running'})
 
 
+class LoginSwitchTests(unittest.TestCase):
+    template = (MODULE / 'templates/jupyterhub_config.py.tftpl').read_text()
+
+    def render(self, mode):
+        """Minimal stand-in for templatefile(): if/else/endif on auth_mode."""
+        def pick(match):
+            return match.group(1) if mode == 'oauth' else (match.group(2) or '')
+        text = re.sub(r'%\{ if auth_mode == "oauth" ~\}\n(.*?)(?:%\{ else ~\}\n(.*?))?%\{ endif ~\}\n', pick, self.template, flags=re.S)
+        self.assertNotIn('%{', text)
+        text = re.sub(r'\$\{(\w+)\}', lambda m: '[]' if m.group(1) == 'admin_users' else '8081' if 'port' in m.group(1) else 'x', text)
+        compile(text, 'jupyterhub_config.py', 'exec')
+        return text
+
+    def test_dummy_mode_has_no_login_server_and_no_secret(self):
+        text = self.render('dummy')
+        for absent in ['oauthenticator', 'client_secret', '/etc/jupyterhub/oauth', 'oauth_callback']:
+            self.assertNotIn(absent, text)
+        self.assertIn('authenticator_class = "dummy"', text)
+
+    def test_oauth_mode_reads_the_mounted_secret(self):
+        text = self.render('oauth')
+        self.assertIn('_secret("client_secret")', text)
+        self.assertNotIn('authenticator_class = "dummy"', text)
+
+    def test_mode_comes_from_the_environment_not_the_request(self):
+        request = make_request(migrated=True)
+        self.assertEqual(w.workload_tfvars(request, ENV)['hub_auth_mode'], 'oauth')
+        self.assertEqual(w.workload_tfvars(request, dict(ENV, HUB_AUTH_MODE='dummy'))['hub_auth_mode'], 'dummy')
+        self.assertIn('mount_oauth = var.hub_config_managed && var.hub_auth_mode == "oauth"', (MODULE / 'main.tf').read_text())
+
+
 class DestroyGuardTests(unittest.TestCase):
     def test_ordinary_operations_pass(self):
         plan = {'resource_changes': [

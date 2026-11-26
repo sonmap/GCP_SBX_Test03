@@ -25,6 +25,9 @@ IMAGE_REGISTRY_PREFIXES: asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/
 DATALAKE_PROJECTS: pjt-c-admin
 MAX_MEMORY_PER_CPU: "8"
 # --- JupyterHub 설정 템플릿에 들어가는 값 (hub_config=MANAGED 일 때만 사용) -----
+# 로그인 방식. dummy = 로그인 서버(Okta) 연동을 끄고 아무 이름으로나 접속 (테스트 전용,
+# Secret Manager 불필요). 실제 연동 시 oauth 로 바꾸고 HUB_OAUTH_BASE_URL 을 채운다.
+HUB_AUTH_MODE: dummy
 HUB_OAUTH_BASE_URL: https://accounts.example.invalid/oauth2/v1
 PORTAL_MEMBERS_API: ""
 HUB_ADMIN_USERS: ""

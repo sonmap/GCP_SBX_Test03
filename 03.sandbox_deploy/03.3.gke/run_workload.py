@@ -74,6 +74,7 @@ def workload_tfvars(request: dict, env: dict) -> dict:
             for item in workload["containers"]
         ],
         "hub_config_managed": workload.get("hub_config", "MANAGED") == "MANAGED",
+        "hub_auth_mode": env.get("HUB_AUTH_MODE", "oauth"),
         "hub_oauth_base_url": env.get("HUB_OAUTH_BASE_URL", ""),
         "portal_members_api": env.get("PORTAL_MEMBERS_API", ""),
         "hub_admin_users": [u.strip() for u in env.get("HUB_ADMIN_USERS", "").split(",") if u.strip()],
@@ -157,9 +158,12 @@ def main():
             "[STOP] the plan would delete protected resources; nothing was applied:\n  "
             + "\n  ".join(blocked))
 
-    # First apply of a task: the namespace must exist before the Secret, and the
-    # Secret before the Pod. Create the namespace alone, then everything else.
-    if request["workload"].get("hub_config", "MANAGED") == "MANAGED":
+    # The login-server Secret is only needed when the managed Hub config uses
+    # OAuth. With HUB_AUTH_MODE=dummy (tests) Secret Manager is not touched.
+    managed = request["workload"].get("hub_config", "MANAGED") == "MANAGED"
+    if managed and env.get("HUB_AUTH_MODE", "oauth") == "oauth":
+        # First apply: the namespace must exist before the Secret, and the
+        # Secret before the Pod. Create the namespace alone, then everything.
         run(["terraform", "apply", "-input=false", "-no-color", "-auto-approve", "-lock-timeout=300s",
              "-target=kubernetes_namespace.task"], env=env, cwd=work)
         ensure_oauth_secret(request, env)

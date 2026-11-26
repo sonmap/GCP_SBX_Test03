@@ -92,6 +92,16 @@ variable "hub_config_mount_path" {
   default = "/etc/jupyterhub/jupyterhub_config.py"
 }
 
+variable "hub_auth_mode" {
+  type        = string
+  default     = "oauth"
+  description = "oauth = login server (needs the hub-oauth Secret). dummy = no login check, tests only."
+  validation {
+    condition     = contains(["oauth", "dummy"], var.hub_auth_mode)
+    error_message = "hub_auth_mode must be oauth or dummy."
+  }
+}
+
 variable "hub_oauth_base_url" {
   type    = string
   default = ""

@@ -50,6 +50,14 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
 
+def hub_auth_mode() -> str:
+    """oauth = real login server. dummy = no login check, for tests only."""
+    mode = os.environ.get("HUB_AUTH_MODE", "oauth")
+    if mode not in ("oauth", "dummy"):
+        raise ValueError("HUB_AUTH_MODE must be oauth or dummy")
+    return mode
+
+
 def enabled_stages(payload: dict) -> list[str]:
     """Google Cloud stages this request needs. Migrated tasks usually need none."""
     stages = []
@@ -433,6 +441,7 @@ def start_build(payload: dict, request_uri: str, bundle_prefix: str):
         f"TF_STATE_BUCKET={os.environ['TF_STATE_BUCKET']}",
         f"SHARED_URL_MAP_NAME={os.environ['SHARED_URL_MAP_NAME']}",
         f"SHARED_HEALTH_CHECK_NAME={os.environ['SHARED_HEALTH_CHECK_NAME']}",
+        f"HUB_AUTH_MODE={hub_auth_mode()}",
         f"HUB_OAUTH_BASE_URL={os.environ.get('HUB_OAUTH_BASE_URL', '')}",
         f"PORTAL_MEMBERS_API={os.environ.get('PORTAL_MEMBERS_API', '')}",
         f"HUB_ADMIN_USERS={os.environ.get('HUB_ADMIN_USERS', '')}",

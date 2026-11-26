@@ -5,6 +5,7 @@
 # pre_spawn_hook, sudospawner) with the three things that must differ on GKE:
 #   1. public URL / base_url / callback come from the ALB route, not VM IP:port
 #   2. OAuth client id and secret are read from mounted files, not written here
+#      (auth_mode "dummy" switches the login server off for tests)
 #   3. internal ports are unique so several Hubs can share one Pod
 # Diff it against the file inside the task image before the first real use.
 import json
@@ -13,7 +14,9 @@ import pwd
 import subprocess
 import urllib.request
 
+%{ if auth_mode == "oauth" ~}
 from oauthenticator.generic import GenericOAuthenticator
+%{ endif ~}
 
 PUBLIC_URL = "${public_url}"
 OAUTH_BASE = "${oauth_base_url}"
@@ -23,6 +26,7 @@ DATA_ROOT = "${data_mount_path}"
 ADMIN_USERS = set(json.loads('${admin_users}'))
 
 
+%{ if auth_mode == "oauth" ~}
 def _secret(name):
     with open(os.path.join("/etc/jupyterhub/oauth", name), encoding="utf-8") as stream:
         return stream.read().strip()
@@ -33,6 +37,7 @@ class CustomGenericOAuth(GenericOAuthenticator):
         return username.split("@")[0].lower()
 
 
+%{ endif ~}
 def _task_members():
     if not PORTAL_MEMBERS_API:
         return None
@@ -75,6 +80,7 @@ c.JupyterHub.bind_url = "http://0.0.0.0:${hub_port}${base_url}"
 c.JupyterHub.hub_port = ${hub_internal_port}
 c.ConfigurableHTTPProxy.api_url = "http://127.0.0.1:${proxy_api_port}"
 
+%{ if auth_mode == "oauth" ~}
 c.JupyterHub.authenticator_class = CustomGenericOAuth
 c.GenericOAuthenticator.client_id = _secret("client_id")
 c.GenericOAuthenticator.client_secret = _secret("client_secret")
@@ -86,6 +92,13 @@ c.GenericOAuthenticator.scope = ["openid", "email", "profile"]
 c.GenericOAuthenticator.username_claim = "email"
 c.GenericOAuthenticator.allow_all = True
 c.GenericOAuthenticator.logout_redirect_url = PUBLIC_URL
+%{ else ~}
+# TEST ONLY (HUB_AUTH_MODE=dummy): the login server is switched off. Any name
+# typed on the login page is accepted without a password. Never use this where
+# real task data is mounted.
+c.JupyterHub.authenticator_class = "dummy"
+c.Authenticator.allow_all = True
+%{ endif ~}
 c.Authenticator.admin_users = ADMIN_USERS
 
 c.JupyterHub.spawner_class = "sudospawner.SudoSpawner"

@@ -21,6 +21,17 @@ flowchart LR
 
 ---
 
+## 로그인 방식 (테스트 / 실연동)
+
+`03.1.request/provisioner-env.yaml` 의 `HUB_AUTH_MODE` 한 줄로 바꿉니다. 바꾼 뒤에는 릴리스를 다시 게시합니다(1번).
+
+| 값 | 로그인 | Secret Manager | 로그인 서버 콜백 등록 |
+|---|---|---|---|
+| `dummy` (현재) | 이름만 입력하면 접속. **테스트 전용** | 불필요 | 불필요 |
+| `oauth` | 로그인 서버(Okta 등) 연동 | `jupyter-oauth-client-id` · `-secret` 필요 | 과제별 주소 등록 |
+
+`dummy` 는 내부 ALB 에 닿는 누구나 아무 이름으로 들어올 수 있습니다. 실제 과제 데이터를 붙인 상태에서는 쓰지 않습니다.
+
 ## 0. 변수
 
 ```bash

@@ -8,6 +8,7 @@ locals {
   selector = { "app" = "jupyter", "sandbox/task" = var.task_name }
 
   static_disk = var.existing_disk != ""
+  mount_oauth = var.hub_config_managed && var.hub_auth_mode == "oauth"
   ports       = { for c in var.containers : tostring(c.hub_port) => c }
 
   # CPU and memory are split evenly; Autopilot bills the Pod total.
@@ -137,6 +138,7 @@ resource "kubernetes_config_map" "hub_config" {
       proxy_api_port     = each.value.hub_port - 80
       base_url           = each.value.base_path
       public_url         = "https://${each.value.host}${each.value.base_path}"
+      auth_mode          = var.hub_auth_mode
       oauth_base_url     = var.hub_oauth_base_url
       portal_members_api = var.portal_members_api
       admin_users        = jsonencode(var.hub_admin_users)
@@ -237,7 +239,7 @@ resource "kubernetes_deployment" "jupyter" {
               }
             }
             dynamic "volume_mount" {
-              for_each = var.hub_config_managed ? [1] : []
+              for_each = local.mount_oauth ? [1] : []
               content {
                 name       = "hub-oauth"
                 mount_path = "/etc/jupyterhub/oauth"
@@ -277,7 +279,7 @@ resource "kubernetes_deployment" "jupyter" {
           }
         }
         dynamic "volume" {
-          for_each = var.hub_config_managed ? [1] : []
+          for_each = local.mount_oauth ? [1] : []
           content {
             name = "hub-oauth"
             secret {
