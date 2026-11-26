@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sonmap.net/schemas/sandbox-request.schema.json",
-  "title": "Approved sandbox provisioning request",
+  "$id": "https://sonmap.net/schemas/sandbox-request-v2.schema.json",
+  "title": "Sandbox task request (full state)",
+  "description": "과제 1개의 '원하는 전체 상태'. 신규·변경·이관 모두 같은 형식이며, 환경별 값(도메인·프로젝트·영역)은 main.py 가 환경변수로 검사한다.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,14 +13,14 @@
     "task",
     "identity",
     "project",
-    "network",
     "data",
     "gke",
+    "workload",
     "source"
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "const": "2.0"
     },
     "request_id": {
       "type": "string",
@@ -49,7 +50,11 @@
       }
     },
     "action": {
-      "const": "CREATE"
+      "enum": [
+        "CREATE",
+        "UPDATE"
+      ],
+      "description": "CREATE=최초 적용, UPDATE=기존 과제의 전체 상태 재적용(중지·기동·증설·이미지 교체). 삭제는 지원하지 않는다."
     },
     "task": {
       "type": "object",
@@ -57,7 +62,8 @@
       "required": [
         "name",
         "display_name",
-        "expires_on"
+        "expires_on",
+        "origin"
       ],
       "properties": {
         "name": {
@@ -72,6 +78,13 @@
         "expires_on": {
           "type": "string",
           "format": "date"
+        },
+        "origin": {
+          "enum": [
+            "NEW",
+            "MIGRATED"
+          ],
+          "description": "MIGRATED=기존 VM 과제. 그룹·프로젝트·데이터는 건드리지 않고 기존 디스크를 PV 로 붙인다."
         }
       }
     },
@@ -80,43 +93,59 @@
       "additionalProperties": false,
       "required": [
         "group_email",
-        "members"
+        "manage_group",
+        "jupyter_gsa"
       ],
       "properties": {
         "group_email": {
           "type": "string",
-          "pattern": "^pgrp-gcp-dev-[a-z0-9-]+@sonmap\\.net$"
+          "pattern": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+        },
+        "manage_group": {
+          "type": "boolean",
+          "description": "true 면 05-group 단계가 그룹·멤버십을 관리한다."
         },
         "members": {
           "type": "array",
-          "minItems": 1,
-          "maxItems": 20,
+          "maxItems": 50,
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._%+-]+@sonmap\\.net$"
+            "pattern": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
           }
         },
         "group_resource_name": {
           "type": "string",
-          "pattern": "^groups/[A-Za-z0-9_-]+$",
-          "description": "Existing group resource to import into the group deployment state; omit for new group."
+          "pattern": "^groups/[A-Za-z0-9_-]+$"
         },
         "membership_resource_names": {
           "type": "object",
           "propertyNames": {
-            "pattern": "^[A-Za-z0-9._%+-]+@sonmap\\.net$"
+            "pattern": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
           },
           "additionalProperties": {
             "type": "string",
             "pattern": "^groups/[A-Za-z0-9_-]+/memberships/[A-Za-z0-9_-]+$"
-          },
-          "description": "Existing requested memberships to import, keyed by email; omit for new members."
+          }
         },
-        "create_jupyter_gsa": {
-          "type": "boolean",
-          "default": false,
-          "description": "Create a dedicated gsa-jupyter-<task> in the task project; required for new projects."
+        "jupyter_gsa": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "email",
+            "create"
+          ],
+          "properties": {
+            "email": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$",
+              "description": "Pod 이 Workload Identity 로 사용할 과제 프로젝트의 서비스 계정."
+            },
+            "create": {
+              "type": "boolean",
+              "description": "true 면 40-data 단계가 생성. 기존 VM SA 재사용은 false."
+            }
+          }
         }
       }
     },
@@ -124,13 +153,17 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "create_project",
-        "project_id",
-        "project_name"
+        "manage",
+        "project_id"
       ],
       "properties": {
+        "manage": {
+          "type": "boolean",
+          "description": "true 면 10-project · 30-project-iam 단계를 실행."
+        },
         "create_project": {
-          "type": "boolean"
+          "type": "boolean",
+          "default": false
         },
         "project_id": {
           "type": "string",
@@ -158,6 +191,24 @@
         {
           "if": {
             "properties": {
+              "manage": {
+                "const": true
+              }
+            },
+            "required": [
+              "manage"
+            ]
+          },
+          "then": {
+            "required": [
+              "create_project",
+              "project_name"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
               "create_project": {
                 "const": true
               }
@@ -170,6 +221,11 @@
             "required": [
               "billing_account"
             ],
+            "properties": {
+              "manage": {
+                "const": true
+              }
+            },
             "oneOf": [
               {
                 "required": [
@@ -196,99 +252,17 @@
         }
       ]
     },
-    "network": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "required",
-        "host_project_id",
-        "network_name",
-        "region",
-        "shared_vpc_join"
-      ],
-      "properties": {
-        "required": {
-          "type": "boolean"
-        },
-        "host_project_id": {
-          "const": "gcp-prod-edp-hub-vpchost"
-        },
-        "network_name": {
-          "const": "vpc-prod-edp-hub"
-        },
-        "region": {
-          "const": "asia-northeast3"
-        },
-        "shared_vpc_join": {
-          "type": "boolean"
-        },
-        "subnet_name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "subnet_cidr": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "private_google_access": {
-          "type": "boolean",
-          "default": true
-        },
-        "create_subnet": {
-          "type": "boolean",
-          "default": true
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "required": {
-                "const": true
-              }
-            },
-            "required": [
-              "required"
-            ]
-          },
-          "then": {
-            "required": [
-              "subnet_name",
-              "subnet_cidr"
-            ],
-            "properties": {
-              "subnet_name": {
-                "type": "string",
-                "minLength": 3
-              },
-              "subnet_cidr": {
-                "type": "string",
-                "pattern": "^[0-9.]+/24$"
-              }
-            }
-          },
-          "else": {
-            "properties": {
-              "shared_vpc_join": {
-                "const": false
-              }
-            }
-          }
-        }
-      ]
-    },
     "data": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "bigquery_dataset",
-        "gcs_bucket"
+        "manage"
       ],
       "properties": {
+        "manage": {
+          "type": "boolean",
+          "description": "true 면 40-data 단계(BQ·GCS·데이터 IAM)를 실행."
+        },
         "bigquery_dataset": {
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,1023}$"
@@ -299,8 +273,7 @@
         },
         "adopt_existing_resources": {
           "type": "boolean",
-          "default": false,
-          "description": "Adopt the approved pre-existing BigQuery dataset and GCS bucket (central sbx-manager is read-only lookup) into Infrastructure Manager state."
+          "default": false
         },
         "datalake_datasets": {
           "type": "array",
@@ -315,17 +288,36 @@
             ],
             "properties": {
               "project_id": {
-                "const": "pjt-c-admin"
+                "type": "string"
               },
               "dataset_id": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,1023}$"
               }
             }
-          },
-          "description": "Approved datasets: grant task GSA dataViewer; caller must have delegated dataset IAM permission."
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "manage": {
+                "const": true
+              }
+            },
+            "required": [
+              "manage"
+            ]
+          },
+          "then": {
+            "required": [
+              "bigquery_dataset",
+              "gcs_bucket"
+            ]
+          }
+        }
+      ]
     },
     "gke": {
       "type": "object",
@@ -333,27 +325,175 @@
       "required": [
         "project_id",
         "cluster_name",
-        "location",
-        "namespace",
-        "jupyter_domain"
+        "location"
       ],
       "properties": {
         "project_id": {
-          "const": "gcp-sbx-edp-gke01"
+          "type": "string"
         },
         "cluster_name": {
-          "const": "gke-sbx-main-an3"
+          "type": "string"
         },
         "location": {
-          "const": "asia-northeast3"
+          "type": "string",
+          "pattern": "^[a-z]+-[a-z]+[0-9]$"
+        }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "area",
+        "namespace",
+        "running",
+        "cpu",
+        "memory_gib",
+        "storage",
+        "containers"
+      ],
+      "properties": {
+        "area": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]{1,15}$",
+          "description": "영역. 허용값은 ALLOWED_AREAS 환경변수."
         },
         "namespace": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]{2,19}$"
+          "pattern": "^[a-z][a-z0-9-]{2,62}$"
         },
-        "jupyter_domain": {
+        "running": {
+          "type": "boolean",
+          "description": "false 면 replicas=0 (중지). 디스크는 유지된다."
+        },
+        "cpu": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "memory_gib": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        },
+        "ephemeral_storage_gib": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 10
+        },
+        "compute_class": {
           "type": "string",
-          "pattern": "^[a-z0-9.-]+\\.sonmap\\.net$"
+          "pattern": "^[A-Za-z][A-Za-z0-9-]{0,62}$",
+          "default": "Balanced"
+        },
+        "gpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "count"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "pattern": "^nvidia-[a-z0-9-]+$"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            }
+          }
+        },
+        "hub_config": {
+          "enum": [
+            "MANAGED",
+            "IMAGE"
+          ],
+          "default": "MANAGED",
+          "description": "MANAGED=저장소의 jupyterhub_config 템플릿을 마운트. IMAGE=이미지 안의 설정을 그대로 사용."
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "size_gb",
+            "zone"
+          ],
+          "properties": {
+            "size_gb": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 4000
+            },
+            "zone": {
+              "type": "string",
+              "pattern": "^[a-z]+-[a-z]+[0-9]-[a-z]$"
+            },
+            "existing_disk": {
+              "type": "string",
+              "pattern": "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",
+              "description": "GKE 프로젝트에 이미 만들어 둔 PD 이름(스냅샷에서 복원). 있으면 정적 PV 로 붙인다."
+            },
+            "storage_class": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+            }
+          }
+        },
+        "containers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "image",
+              "hub_port",
+              "host",
+              "base_path"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z]([-a-z0-9]{0,30}[a-z0-9])?$"
+              },
+              "image": {
+                "type": "string",
+                "pattern": "^[a-z0-9./_:-]+@sha256:[0-9a-f]{64}$",
+                "description": "digest 고정 이미지."
+              },
+              "hub_port": {
+                "type": "integer",
+                "minimum": 8080,
+                "maximum": 8089
+              },
+              "host": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$"
+              },
+              "base_path": {
+                "type": "string",
+                "pattern": "^/([a-z0-9-]+/)*$",
+                "description": "'/' 면 호스트 방식, 그 외는 경로 방식 (JupyterHub base_url)."
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     },

@@ -1,10 +1,32 @@
+# --- 플랫폼 위치 -------------------------------------------------------------
 SBX_GKE_PROJECT: gcp-sbx-edp-gke01
 GCP_REGION: asia-northeast3
+GKE_CLUSTER_NAME: gke-sbx-main-an3
+GKE_ENDPOINT_MODE: dns
+WORKER_POOL: projects/gcp-sbx-edp-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01
 REQUEST_BUCKET: gcp-sbx-edp-gke01-sbxtest01-requests
 BUNDLE_BUCKET: gcp-sbx-edp-gke01-sbxtest01-bundles
-GITHUB_REPOSITORY: sonmap/GCP_SBX_Test01
-WORKER_POOL: projects/gcp-sbx-edp-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01
+TF_STATE_BUCKET: gcp-sbx-edp-gke01-sbxtest01-tfstate
+RUNNER_IMAGE_REPO: asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner
+TF_MANAGER_SA: tf-manager
+DEPLOYMENT_PREFIX: sbxtest01
+GITHUB_REPOSITORY: sonmap/GCP_SBX_Test03
+# --- 공유 ALB (1차 구축에서 한 번 생성) ---------------------------------------
+SHARED_URL_MAP_NAME: urlmap-alb-sbxtest01-shared
+SHARED_HEALTH_CHECK_NAME: hc-sbxtest01-jupyter-tcp
+# --- 이름·허용 규칙 (환경마다 다른 값) -----------------------------------------
 CLOUD_IDENTITY_CUSTOMER_ID: __SET_CUSTOMER_ID__
-JUPYTER_CHART_URI: oci://asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/jupyterhub
-JUPYTER_CHART_VERSION: 4.2.0
-GKE_ENDPOINT_MODE: dns
+GROUP_EMAIL_TEMPLATE: "pgrp-gcp-dev-{task}@sonmap.net"
+MEMBER_EMAIL_DOMAINS: sonmap.net
+NAMESPACE_TEMPLATE: "sbx-{area}-{task}"
+ALLOWED_AREAS: general,anonymous,common,sa
+JUPYTER_HOST_SUFFIXES: .sonmap.net
+IMAGE_REGISTRY_PREFIXES: asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/
+DATALAKE_PROJECTS: pjt-c-admin
+MAX_MEMORY_PER_CPU: "8"
+# --- JupyterHub 설정 템플릿에 들어가는 값 (hub_config=MANAGED 일 때만 사용) -----
+HUB_OAUTH_BASE_URL: https://accounts.example.invalid/oauth2/v1
+PORTAL_MEMBERS_API: ""
+HUB_ADMIN_USERS: ""
+# Workload Identity 바인딩을 다른 계정으로 수행할 때만 지정 (비우면 tf-manager)
+WI_IMPERSONATE_SA: ""

@@ -12,4 +12,3 @@ __pycache__/
 *.pem
 *.key
 
-/03.sandbox_deploy/03.3.gke/notebook-image/wheelhouse/

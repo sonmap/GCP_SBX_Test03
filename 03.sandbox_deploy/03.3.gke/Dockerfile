@@ -1,19 +1,22 @@
 FROM gcr.io/google.com/cloudsdktool/cloud-sdk:slim
 
-ARG HELM_VERSION=v3.16.2
+ARG TERRAFORM_VERSION=1.9.8
 
 COPY 03.sandbox_deploy/03.3.gke/requirements.txt /tmp/requirements.txt
-COPY 03.sandbox_deploy/03.3.gke/apply_gke_workload.py /opt/sandbox/apply_gke_workload.py
-COPY 03.sandbox_deploy/03.3.gke/reconcile_postdeploy.py /opt/sandbox/reconcile_postdeploy.py
+COPY 03.sandbox_deploy/03.3.gke/run_workload.py 03.sandbox_deploy/03.3.gke/reconcile_postdeploy.py /opt/sandbox/
+COPY 03.sandbox_deploy/03.2.terraform/deployments/50-workload /opt/sandbox/terraform/50-workload
 
-COPY 03.sandbox_deploy/03.3.gke/shared-group/shared_sandbox.py 03.sandbox_deploy/03.3.gke/shared-group/hub_spawner.py 03.sandbox_deploy/03.3.gke/shared-group/notebook_slot.py 03.sandbox_deploy/03.3.gke/shared-group/test_passwords.py /opt/sandbox/shared-group/
-COPY 03.sandbox_deploy/03.3.gke/deploy_shared_group.py /opt/sandbox/deploy_shared_group.py
-
+# Terraform and its providers are baked into the image: the private pool needs
+# no registry access at run time, and the module version is tied to the image tag.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl kubectl python3-pip skopeo google-cloud-cli-gke-gcloud-auth-plugin \
+    && apt-get install -y --no-install-recommends ca-certificates curl unzip kubectl python3-pip google-cloud-cli-gke-gcloud-auth-plugin \
     && pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
-    && curl -fsSLo /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-    && tar -xzf /tmp/helm.tar.gz -C /tmp \
-    && install /tmp/linux-amd64/helm /usr/local/bin/helm \
-    && chmod 0555 /opt/sandbox/apply_gke_workload.py /opt/sandbox/reconcile_postdeploy.py \
-    && rm -rf /var/lib/apt/lists/* /tmp/helm.tar.gz /tmp/linux-amd64 /tmp/requirements.txt
+    && curl -fsSLo /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+    && unzip -q /tmp/terraform.zip terraform -d /usr/local/bin \
+    && terraform -chdir=/opt/sandbox/terraform/50-workload providers mirror /opt/sandbox/terraform/providers \
+    && printf 'provider_installation {\n  filesystem_mirror {\n    path = "/opt/sandbox/terraform/providers"\n  }\n}\n' > /opt/sandbox/terraform/terraformrc \
+    && chmod 0555 /opt/sandbox/run_workload.py /opt/sandbox/reconcile_postdeploy.py \
+    && rm -rf /var/lib/apt/lists/* /tmp/terraform.zip /tmp/requirements.txt
+
+ENV TF_CLI_CONFIG_FILE=/opt/sandbox/terraform/terraformrc \
+    TF_IN_AUTOMATION=1

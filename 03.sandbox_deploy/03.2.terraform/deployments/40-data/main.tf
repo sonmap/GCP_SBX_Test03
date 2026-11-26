@@ -3,22 +3,28 @@ provider "google" {
   region  = var.region
 }
 
+# The Pod's Google identity. New tasks create it here; tasks that already have
+# one (for example the service account of the former notebook VM) only look it up.
+# The Workload Identity binding itself lives in 50-workload, next to the KSA.
+locals {
+  jupyter_account_id = split("@", var.jupyter_gsa_email)[0]
+}
+
 resource "google_service_account" "jupyter" {
   count        = var.create_jupyter_gsa ? 1 : 0
   project      = var.project_id
-  account_id   = "gsa-jupyter-${var.task_name}"
+  account_id   = local.jupyter_account_id
   display_name = "Jupyter ${var.task_name}"
 }
 
 data "google_service_account" "jupyter" {
   count      = var.create_jupyter_gsa ? 0 : 1
-  project    = var.identity_project_id
+  project    = var.project_id
   account_id = var.jupyter_gsa_email
 }
 
 locals {
   jupyter_email = var.create_jupyter_gsa ? google_service_account.jupyter[0].email : data.google_service_account.jupyter[0].email
-  jupyter_name  = var.create_jupyter_gsa ? google_service_account.jupyter[0].name : data.google_service_account.jupyter[0].name
 }
 
 resource "google_bigquery_dataset" "sandbox" {
@@ -81,12 +87,6 @@ resource "google_storage_bucket_iam_member" "jupyter" {
   bucket = google_storage_bucket.sandbox.name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${local.jupyter_email}"
-}
-
-resource "google_service_account_iam_member" "workload_identity" {
-  service_account_id = local.jupyter_name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.gke_project_id}.svc.id.goog[${var.gke_namespace}/${var.jupyter_ksa_name}]"
 }
 
 output "jupyter_service_account" { value = local.jupyter_email }

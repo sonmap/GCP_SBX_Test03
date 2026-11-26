@@ -1,25 +1,38 @@
-# 과제별 Infrastructure Manager Terraform
+# 과제별 Terraform
 
-> 신규 프로젝트·과제 전용 GSA 생성은 [sbx03 신규 과제 절차](../../02.infra-setup/reference/sbx03-new-project-runbook.md)를 우선 적용합니다. 기존 프로젝트 재사용 절차와 구분하세요.
+코드는 한 벌이고 State 는 **과제 × 단계**마다 따로 있습니다. VM 에서 직접 `terraform apply` 하지 않습니다.
 
-최초 1~3단계는 [1차 인프라 구축](../../02.infra-setup/infra-setup-commend.md)의 개별 명령을 사용합니다. 이 폴더는 과제별 자원을 관리합니다.
+| 단계 | 만드는 것 | 실행 | State | 실행 조건 |
+|---|---|---|---|---|
+| `05-group` | Cloud Identity 그룹 · 구성원 | Infrastructure Manager | Deployment `<prefix>-<과제>-<hash>-group` | `identity.manage_group` |
+| `10-project` | 프로젝트 · API · 자동화 IAM | 〃 | `…-project` | `project.manage` |
+| `30-project-iam` | 그룹의 프로젝트 권한 | 〃 | `…-project-iam` | `project.manage` |
+| `40-data` | BigQuery · GCS · 서비스 계정 · 데이터 권한 | 〃 | `…-data` | `data.manage` |
+| `50-workload` | Namespace · KSA · Workload Identity · PV/PVC · Pod · Service | Runner (Terraform CLI) | `gs://<TF_STATE_BUCKET>/tasks/<과제>/50-workload` | 항상 |
 
-| Root | 기능 | 실행 계정 |
-|---|---|---|
-| deployments/05-group | Cloud Identity Group·구성원 관리 | tf-manager |
-| deployments/10-project | 신규/기존 프로젝트와 API·자동화 IAM | tf-manager |
-| deployments/20-network | 선택적 과제 서브넷·Shared VPC 연결 | tf-manager |
-| deployments/30-project-iam | 과제 Google Group 프로젝트 권한 | tf-manager |
-| deployments/40-data | Dataset·Bucket·중앙 GSA 접근·Workload Identity | tf-manager |
+기존 VM 과제(`origin: MIGRATED`)는 그룹 · 프로젝트 · 데이터가 이미 있으므로 **`50-workload` 만** 실행합니다.
 
-중앙 `sbx-manager`는 data source로 조회합니다. 이 Terraform은 GSA를 생성하지 않습니다. data.adopt_existing_resources는 Dataset/Bucket 편입용입니다. 기존 그룹·멤버는 identity의 별도 import 필드로 편입합니다.
+## 50-workload
 
-각 Root는 `sbxtest01-<task>-<project-hash>-<stage>` Infrastructure Manager Deployment에서 독립 State로 관리합니다. VM에서 직접 terraform apply하지 않습니다. Kubernetes와 ALB 연결은 Cloud Build Runner가 처리합니다.
+```mermaid
+flowchart TB
+    subgraph NS["Namespace · 과제 1개"]
+      KSA["KSA"] -.Workload Identity.-> GSA["과제 프로젝트의 서비스 계정"]
+      D["Deployment · Recreate<br/>replicas = running ? 1 : 0"] --> POD["Pod<br/>컨테이너 1개 (필요 시 여러 개)"]
+      POD --> PVC["PVC data → /home/jupyter"]
+      SVC["Service · 포트별 NEG"] --> POD
+    end
+    PVC --> PV["기존 디스크: 정적 PV (Retain)<br/>신규: 동적 생성"]
+```
 
-## 그룹 생성이 첫 단계입니다
+| 요청 값 | Terraform 에서 바뀌는 것 |
+|---|---|
+| `running` | `replicas` 1 ↔ 0. 디스크 · 경로는 유지 |
+| `cpu` · `memory_gib` | Pod 자원. Pod 재시작 |
+| `storage.size_gb` (증가만) | PVC 크기 |
+| `containers[].image` | 이미지 교체. Pod 재시작 |
+| `containers[]` 추가 | 같은 Pod 에 컨테이너 · 포트 추가 |
 
-05-group → 10-project → 선택적 20-network → 30-project-iam → 40-data 순서로 Infrastructure Manager가 적용합니다. 모든 단계는 tf-manager로 수행합니다. [권한 및 기존 그룹 편입](../../02.infra-setup/reference/cloud-identity-group-terraform.md)을 먼저 확인합니다.
+**지워지지 않게 한 것** · PV 와 PVC 는 `prevent_destroy`, PV 는 `Retain` 입니다. Runner 도 적용 전에 삭제 계획을 막습니다.
 
-## Host 네트워크 변경은 VPC Admin 수행
-
-현재 API는 Subnet 생성과 Shared VPC 연결 변경을 요청하면 거절합니다. 기본 network.required=false를 사용하며, 별도 승인된 기존 Subnet 조회가 필요한 경우에만 required=true / create_subnet=false / shared_vpc_join=false로 요청합니다. VPC Admin이 먼저 해당 Subnet을 구성·연결하고 사용 권한을 부여해야 합니다. 과거 네트워크 리소스를 소유한 state는 이 변경으로 자동 변경·삭제하지 않습니다.
+**Hub 설정** · `hub_config: MANAGED` 면 [`templates/jupyterhub_config.py.tftpl`](deployments/50-workload/templates/jupyterhub_config.py.tftpl) 을 이미지의 설정 파일 위에 덮어 마운트합니다. VM 의 설정과 다른 점은 세 가지입니다 — 접속 주소가 ALB 주소, OAuth 값은 파일에서 읽음, 내부 포트가 컨테이너마다 다름. **이 템플릿은 참고본이므로 실제 이미지 안의 파일과 비교한 뒤 사용합니다.** `IMAGE` 면 이미지 안의 설정을 그대로 씁니다.

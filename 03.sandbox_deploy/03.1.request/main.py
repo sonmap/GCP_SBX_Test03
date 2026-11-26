@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import ipaddress
 import io
 import json
 import os
@@ -22,13 +21,45 @@ REQUEST_RE = re.compile(r"^REQ-[A-Z0-9-]{6,64}$")
 SCHEMA = json.loads(Path(__file__).with_name("sandbox-request.schema.json").read_text())
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
+# stage -> (archive name, Infrastructure Manager deployment suffix)
 STAGES = {
-    "05-group": "group.zip",
-    "10-project": "project.zip",
-    "20-network": "network.zip",
-    "30-project-iam": "project-iam.zip",
-    "40-data": "data.zip",
+    "05-group": ("group.zip", "group"),
+    "10-project": ("project.zip", "project"),
+    "30-project-iam": ("project-iam.zip", "project-iam"),
+    "40-data": ("data.zip", "data"),
 }
+# Terraform source layout inside the released sandbox-source.zip.
+SOURCE_DEPLOYMENTS_DIR = "deployments"
+# Fields that can never change after the first apply. A change means a new task.
+IMMUTABLE_FIELDS = (
+    ("task", "origin"),
+    ("project", "project_id"),
+    ("identity", "group_email"),
+    ("identity", "jupyter_gsa", "email"),
+    ("gke", "project_id"),
+    ("gke", "cluster_name"),
+    ("workload", "area"),
+    ("workload", "namespace"),
+    ("workload", "storage", "zone"),
+    ("workload", "storage", "existing_disk"),
+    ("workload", "storage", "storage_class"),
+)
+
+
+def env_list(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
+def enabled_stages(payload: dict) -> list[str]:
+    """Google Cloud stages this request needs. Migrated tasks usually need none."""
+    stages = []
+    if payload["identity"]["manage_group"]:
+        stages.append("05-group")
+    if payload["project"]["manage"]:
+        stages.extend(["10-project", "30-project-iam"])
+    if payload["data"]["manage"]:
+        stages.append("40-data")
+    return stages
 
 
 def parse_gs_uri(uri: str) -> tuple[str, str]:
@@ -61,48 +92,129 @@ def download_approved_request(uri: str, generation: int, expected_sha256: str) -
 
 
 def validate_semantics(payload: dict) -> None:
-    customer_id = os.environ.get("CLOUD_IDENTITY_CUSTOMER_ID", "")
-    if not re.fullmatch(r"C[A-Za-z0-9]+", customer_id):
-        raise ValueError("configure CLOUD_IDENTITY_CUSTOMER_ID before deployment")
-    identity = payload["identity"]
+    """Environment policy. Naming rules live in env vars, not in the schema."""
+    identity, project, data = payload["identity"], payload["project"], payload["data"]
+    gke, workload = payload["gke"], payload["workload"]
+    task = payload["task"]["name"]
+    migrated = payload["task"]["origin"] == "MIGRATED"
+
+    if payload["source"]["sha256"] == "0" * 64:
+        raise ValueError("publish a platform release and update request source first")
+
+    # --- identity -----------------------------------------------------------
+    expected_group = os.environ["GROUP_EMAIL_TEMPLATE"].format(task=task)
+    if identity["group_email"] != expected_group:
+        raise ValueError(f"group_email must be {expected_group}")
+    members = identity.get("members", [])
+    if identity["manage_group"]:
+        customer_id = os.environ.get("CLOUD_IDENTITY_CUSTOMER_ID", "")
+        if not re.fullmatch(r"C[A-Za-z0-9]+", customer_id):
+            raise ValueError("configure CLOUD_IDENTITY_CUSTOMER_ID before deployment")
+        if not members:
+            raise ValueError("identity.members is required when manage_group=true")
+        domains = env_list("MEMBER_EMAIL_DOMAINS")
+        for member in members:
+            if member.rsplit("@", 1)[1].lower() not in domains:
+                raise ValueError(f"member domain is not allowed: {member}")
     group_name = identity.get("group_resource_name")
     membership_names = identity.get("membership_resource_names", {})
     if membership_names and not group_name:
         raise ValueError("group_resource_name is required when importing memberships")
-    if not set(membership_names).issubset(identity["members"]):
+    if not set(membership_names).issubset(members):
         raise ValueError("imported membership keys must be approved identity.members")
     for name in membership_names.values():
         if not name.startswith(f"{group_name}/memberships/"):
             raise ValueError("membership resource must belong to group_resource_name")
-    task = payload["task"]["name"]
-    if payload["source"]["sha256"] == "0" * 64:
-        raise ValueError("publish a new GCP_SBX_Test01 release and update request source first")
-    if payload["identity"]["group_email"] != f"pgrp-gcp-dev-{task}@sonmap.net":
-        raise ValueError("group_email must match the approved task name")
-    if payload["gke"]["namespace"] != task:
-        raise ValueError("GKE namespace must match the approved task name")
 
-    if identity.get("create_jupyter_gsa", False) and len(task) > 18:
-        raise ValueError("dedicated GSA task name must be at most 18 characters")
-    if payload["project"]["create_project"] and not identity.get("create_jupyter_gsa", False):
-        raise ValueError("new projects require identity.create_jupyter_gsa=true")
-    if payload["data"].get("datalake_datasets") and not identity.get("create_jupyter_gsa", False):
-        raise ValueError("datalake access requires a dedicated task GSA")
+    gsa = identity["jupyter_gsa"]
+    if not gsa["email"].endswith(f"@{project['project_id']}.iam.gserviceaccount.com"):
+        raise ValueError("jupyter_gsa.email must be a service account of the task project")
+    if gsa["create"] and not data["manage"]:
+        raise ValueError("jupyter_gsa.create=true requires data.manage=true (40-data creates it)")
+    if project.get("create_project", False) and not gsa["create"]:
+        raise ValueError("new projects require identity.jupyter_gsa.create=true")
+    if data.get("datalake_datasets"):
+        if not data["manage"]:
+            raise ValueError("datalake access requires data.manage=true")
+        allowed = env_list("DATALAKE_PROJECTS")
+        for item in data["datalake_datasets"]:
+            if item["project_id"] not in allowed:
+                raise ValueError(f"datalake project is not allowed: {item['project_id']}")
 
-    network = payload["network"]
-    if network["required"]:
-        if network.get("create_subnet", True) or network["shared_vpc_join"]:
-            raise ValueError("Host network changes are managed by VPC Admin; use an existing subnet with create_subnet=false and shared_vpc_join=false")
-        if network.get("subnet_name") != f"subnet-{task}-an3":
-            raise ValueError("subnet_name must match the approved task name")
-        try:
-            subnet = ipaddress.ip_network(network.get("subnet_cidr", ""), strict=True)
-        except ValueError as error:
-            raise ValueError("subnet_cidr must be a valid network address") from error
-        if subnet.version != 4 or subnet.prefixlen != 24:
-            raise ValueError("approved sandbox subnet must be IPv4 /24")
-    elif network["shared_vpc_join"]:
-        raise ValueError("shared_vpc_join cannot be true when network.required is false")
+    # --- migrated tasks: never touch what already exists ------------------------
+    if migrated:
+        if project.get("create_project", False) or gsa["create"]:
+            raise ValueError("MIGRATED tasks reuse the existing project and service account")
+        if not workload["storage"].get("existing_disk"):
+            raise ValueError("MIGRATED tasks require workload.storage.existing_disk")
+
+    # --- GKE / workload -------------------------------------------------------
+    if gke["project_id"] != os.environ["SBX_GKE_PROJECT"]:
+        raise ValueError("gke.project_id must be the platform GKE project")
+    if gke["cluster_name"] != os.environ["GKE_CLUSTER_NAME"]:
+        raise ValueError("gke.cluster_name must be the platform cluster")
+    if gke["location"] != os.environ["GCP_REGION"]:
+        raise ValueError("gke.location must be the platform region")
+    if workload["area"] not in env_list("ALLOWED_AREAS"):
+        raise ValueError(f"workload.area must be one of {env_list('ALLOWED_AREAS')}")
+    expected_namespace = os.environ["NAMESPACE_TEMPLATE"].format(task=task, area=workload["area"])
+    if workload["namespace"] != expected_namespace:
+        raise ValueError(f"workload.namespace must be {expected_namespace}")
+    if not workload["storage"]["zone"].startswith(gke["location"] + "-"):
+        raise ValueError("workload.storage.zone must be a zone of gke.location")
+
+    # Autopilot bills what it rounds up to; keep requests inside a real ratio.
+    ratio = workload["memory_gib"] / workload["cpu"]
+    max_ratio = float(os.environ.get("MAX_MEMORY_PER_CPU", "8"))
+    if ratio < 1 or ratio > max_ratio:
+        raise ValueError(f"memory_gib per cpu must be between 1 and {max_ratio:g}")
+
+    containers = workload["containers"]
+    prefixes = env_list("IMAGE_REGISTRY_PREFIXES")
+    host_suffixes = env_list("JUPYTER_HOST_SUFFIXES")
+    for field in ("name", "hub_port"):
+        values = [item[field] for item in containers]
+        if len(values) != len(set(values)):
+            raise ValueError(f"containers[].{field} must be unique within the task")
+    routes = [(item["host"], item["base_path"]) for item in containers]
+    if len(routes) != len(set(routes)):
+        raise ValueError("containers[] host + base_path must be unique within the task")
+    for item in containers:
+        if not any(item["image"].startswith(prefix) for prefix in prefixes):
+            raise ValueError(f"image registry is not allowed: {item['image'].split('@')[0]}")
+        if not any(item["host"].endswith(suffix) for suffix in host_suffixes):
+            raise ValueError(f"host is not an approved Jupyter domain: {item['host']}")
+
+
+def _dig(data: dict, path: tuple):
+    for key in path:
+        if not isinstance(data, dict) or key not in data:
+            return None
+        data = data[key]
+    return data
+
+
+def validate_against_applied(payload: dict, applied: dict | None) -> None:
+    """Compare with the last successfully applied request of the same task."""
+    if applied is None:
+        if payload["action"] == "UPDATE":
+            raise ValueError("no applied state for this task; submit action=CREATE first")
+        return
+    for path in IMMUTABLE_FIELDS:
+        if _dig(payload, path) != _dig(applied, path):
+            raise ValueError(f"{'.'.join(path)} cannot change after the first apply")
+    if payload["workload"]["storage"]["size_gb"] < applied["workload"]["storage"]["size_gb"]:
+        raise ValueError("workload.storage.size_gb cannot shrink")
+    if payload["project"].get("create_project", False) != applied["project"].get("create_project", False):
+        raise ValueError("project.create_project cannot change after the first apply")
+
+
+def load_applied_request(task: str) -> dict | None:
+    """The runner writes this object after a fully successful apply."""
+    blob = storage.Client().bucket(os.environ["BUNDLE_BUCKET"]).blob(f"tasks/{task}/applied-request.json")
+    if not blob.exists():
+        return None
+    return json.loads(blob.download_as_bytes())
 
 
 def download_source_archive(source: dict, destination: Path) -> Path:
@@ -133,55 +245,37 @@ def download_source_archive(source: dict, destination: Path) -> Path:
 def stage_variables(payload: dict) -> dict[str, dict]:
     task = payload["task"]
     project = payload["project"]
-    network = payload["network"]
     data = payload["data"]
-    gke = payload["gke"]
-    task_name = task["name"]
-    jupyter_ksa = f"ksa-jupyter-{task_name}"
-    create_gsa = payload["identity"].get("create_jupyter_gsa", False)
-    identity_project = project["project_id"] if create_gsa else os.environ["SBX_GKE_PROJECT"]
-    jupyter_gsa = (f"gsa-jupyter-{task_name}@{identity_project}.iam.gserviceaccount.com"
-                   if create_gsa else f"sbx-manager@{identity_project}.iam.gserviceaccount.com")
-    sandbox_project = os.environ["SBX_GKE_PROJECT"]
+    identity = payload["identity"]
+    region = payload["gke"]["location"]
+    tf_manager = f"{os.environ.get('TF_MANAGER_SA', 'tf-manager')}@{os.environ['SBX_GKE_PROJECT']}.iam.gserviceaccount.com"
 
     return {
         "05-group": {
-            "identity_project_id": sandbox_project,
-            "customer_id": os.environ["CLOUD_IDENTITY_CUSTOMER_ID"],
-            "group_email": payload["identity"]["group_email"],
+            "identity_project_id": os.environ["SBX_GKE_PROJECT"],
+            "customer_id": os.environ.get("CLOUD_IDENTITY_CUSTOMER_ID", ""),
+            "group_email": identity["group_email"],
             "display_name": task["display_name"],
-            "members": payload["identity"]["members"],
+            "members": identity.get("members", []),
         },
         "10-project": {
-            "create_project": project["create_project"],
-            "project_id": project["project_id"], "project_name": project["project_name"],
+            "create_project": project.get("create_project", False),
+            "project_id": project["project_id"], "project_name": project.get("project_name"),
             "folder_id": project.get("folder_id"), "org_id": project.get("org_id"),
             "billing_account": project.get("billing_account"),
-            "task_name": task_name, "expires_on": task["expires_on"], "region": network["region"],
-            "project_iam_service_account": f"tf-manager@{sandbox_project}.iam.gserviceaccount.com",
-            "data_admin_service_account": f"tf-manager@{sandbox_project}.iam.gserviceaccount.com",
-        },
-        "20-network": {
-            "network_required": network["required"], "create_subnet": network.get("create_subnet", True),
-            "host_project_id": network["host_project_id"],
-            "service_project_id": project["project_id"], "network_name": network["network_name"],
-            "region": network["region"], "subnet_name": network.get("subnet_name") or "",
-            "subnet_cidr": network.get("subnet_cidr") or "",
-            "private_google_access": network.get("private_google_access", True),
-            "shared_vpc_join": network["shared_vpc_join"],
+            "task_name": task["name"], "expires_on": task["expires_on"], "region": region,
+            "project_iam_service_account": tf_manager,
+            "data_admin_service_account": tf_manager,
         },
         "30-project-iam": {
-            "project_id": project["project_id"], "group_email": payload["identity"]["group_email"],
+            "project_id": project["project_id"], "group_email": identity["group_email"],
         },
         "40-data": {
-            "project_id": project["project_id"], "region": network["region"], "task_name": task_name,
-            "group_email": payload["identity"]["group_email"],
-            "bigquery_dataset": data["bigquery_dataset"], "gcs_bucket": data["gcs_bucket"],
-            "gke_project_id": gke["project_id"], "gke_namespace": gke["namespace"],
-            "jupyter_ksa_name": jupyter_ksa,
-            "jupyter_gsa_email": jupyter_gsa,
-            "identity_project_id": identity_project,
-            "create_jupyter_gsa": create_gsa,
+            "project_id": project["project_id"], "region": region, "task_name": task["name"],
+            "group_email": identity["group_email"],
+            "bigquery_dataset": data.get("bigquery_dataset"), "gcs_bucket": data.get("gcs_bucket"),
+            "jupyter_gsa_email": identity["jupyter_gsa"]["email"],
+            "create_jupyter_gsa": identity["jupyter_gsa"]["create"],
             "datalake_datasets": data.get("datalake_datasets", []),
         },
     }
@@ -260,17 +354,15 @@ def assemble_bundles(payload: dict, raw_request: bytes) -> tuple[str, dict]:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
-        source_root = download_source_archive(payload["source"], temp / "source")
-        deployment_root = source_root / "08.sandbox_setup_02_terraform" / "deployments"
-        for stage, archive_name in STAGES.items():
+        stages = enabled_stages(payload)
+        if stages:
+            source_root = download_source_archive(payload["source"], temp / "source")
+            deployment_root = source_root / SOURCE_DEPLOYMENTS_DIR
+        for stage in stages:
+            archive_name = STAGES[stage][0]
             source = deployment_root / stage
             if not source.is_dir():
                 raise ValueError(f"missing Terraform root module: {stage}")
-            if payload["identity"].get("create_jupyter_gsa", False):
-                if stage == "40-data" and 'resource "google_service_account" "jupyter"' not in (source / "main.tf").read_text():
-                    raise ValueError("source release does not support dedicated task GSA; publish a new release")
-                if stage == "10-project" and payload["project"].get("org_id") and 'variable "org_id"' not in (source / "variables.tf").read_text():
-                    raise ValueError("source release does not support org_id; publish a new release")
             work = temp / "work" / stage
             shutil.copytree(source, work)
             if stage == "05-group":
@@ -303,30 +395,21 @@ def start_build(payload: dict, request_uri: str, bundle_prefix: str):
     task = payload["task"]["name"]
     request_id = payload["request_id"]
     release_id = payload["source"]["release_id"]
+    deployment_prefix = os.environ.get("DEPLOYMENT_PREFIX", "sbx")
     deployment_key = hashlib.sha256(payload["project"]["project_id"].encode()).hexdigest()[:8]
     worker_pool = os.environ["WORKER_POOL"]
-    service_account = f"projects/{project}/serviceAccounts/tf-manager@{project}.iam.gserviceaccount.com"
+    tf_manager = f"{os.environ.get('TF_MANAGER_SA', 'tf-manager')}@{project}.iam.gserviceaccount.com"
+    service_account = f"projects/{project}/serviceAccounts/{tf_manager}"
 
-    # Infrastructure Manager manages Google Cloud resources only. Kubernetes
-    # objects are applied by a separate Cloud Build running in the private pool.
-    stages = [
-        ("group", "group.zip", "tf-manager"),
-        ("project", "project.zip", "tf-manager"),
-    ]
-    if payload["network"]["required"]:
-        stages.append(("network", "network.zip", "tf-manager"))
-    stages.extend([
-        ("project-iam", "project-iam.zip", "tf-manager"),
-        ("data", "data.zip", "tf-manager"),
-    ])
-
+    # Stage A (Infrastructure Manager, one state per task per stage): group,
+    # project, IAM, data. Skipped entirely when the request manages none of them.
     commands = ["set -euo pipefail"]
-    for name, archive, account_id in stages:
-        account_email = f"{account_id}@{project}.iam.gserviceaccount.com"
+    for stage in enabled_stages(payload):
+        archive, name = STAGES[stage]
         commands.append(
             "gcloud infra-manager deployments apply "
-            f"\"projects/{project}/locations/{region}/deployments/sbxtest01-{task}-{deployment_key}-{name}\" "
-            f"--service-account=\"projects/{project}/serviceAccounts/{account_email}\" "
+            f"\"projects/{project}/locations/{region}/deployments/{deployment_prefix}-{task}-{deployment_key}-{name}\" "
+            f"--service-account=\"{service_account}\" "
             f"--gcs-source=\"{bundle_prefix}/{archive}\" "
             f"--worker-pool=\"{worker_pool}\" "
             "--provider-source=SERVICE_MAINTAINED "
@@ -336,22 +419,24 @@ def start_build(payload: dict, request_uri: str, bundle_prefix: str):
         if name == "group":
             # Group IAM visibility may lag creation. Failures stop the build.
             commands.append("sleep 60")
+    if len(commands) == 1:
+        commands.append("echo 'no Google Cloud stage requested; workload only'")
 
-    # The approved source release and runner image use the same immutable tag.
-    # This prevents a newer :latest image from changing an already-approved build.
-    automation_image = (
-        f"{region}-docker.pkg.dev/{project}/ar-sbxtest01-platform/"
-        f"sbxtest01-automation-runner:{release_id}"
-    )
+    # Stage B (runner image, Terraform CLI + GCS state per task): Kubernetes
+    # workload, then ALB attachment. The runner image tag equals the approved
+    # release, so the 50-workload module cannot drift under an approved request.
+    automation_image = f"{os.environ['RUNNER_IMAGE_REPO']}:{release_id}"
     common_env = [
         f"SBX_GKE_PROJECT={project}",
         f"GCP_REGION={region}",
-        f"GKE_ADMIN_SA=tf-manager@{project}.iam.gserviceaccount.com",
-        f"LB_ADMIN_SA=tf-manager@{project}.iam.gserviceaccount.com",
-        f"JUPYTER_CHART_URI={os.environ['JUPYTER_CHART_URI']}",
-        f"JUPYTER_CHART_VERSION={os.environ['JUPYTER_CHART_VERSION']}",
-        f"WORKER_POOL={worker_pool}",
-        "SHARED_URL_MAP_NAME=urlmap-alb-sbxtest01-shared",
+        f"BUNDLE_BUCKET={os.environ['BUNDLE_BUCKET']}",
+        f"TF_STATE_BUCKET={os.environ['TF_STATE_BUCKET']}",
+        f"SHARED_URL_MAP_NAME={os.environ['SHARED_URL_MAP_NAME']}",
+        f"SHARED_HEALTH_CHECK_NAME={os.environ['SHARED_HEALTH_CHECK_NAME']}",
+        f"HUB_OAUTH_BASE_URL={os.environ.get('HUB_OAUTH_BASE_URL', '')}",
+        f"PORTAL_MEMBERS_API={os.environ.get('PORTAL_MEMBERS_API', '')}",
+        f"HUB_ADMIN_USERS={os.environ.get('HUB_ADMIN_USERS', '')}",
+        f"WI_IMPERSONATE_SA={os.environ.get('WI_IMPERSONATE_SA', '')}",
         "KUBECONFIG=/workspace/kubeconfig",
         f"GKE_ENDPOINT_MODE={os.environ.get('GKE_ENDPOINT_MODE', 'internal')}",
     ]
@@ -360,19 +445,13 @@ def start_build(payload: dict, request_uri: str, bundle_prefix: str):
             {
                 "name": automation_image,
                 "entrypoint": "python3",
-                "args": [
-                    "/opt/sandbox/apply_gke_workload.py",
-                    f"{bundle_prefix}/approved-request.json",
-                ],
+                "args": ["/opt/sandbox/run_workload.py", f"{bundle_prefix}/approved-request.json"],
                 "env": common_env,
             },
             {
                 "name": automation_image,
                 "entrypoint": "python3",
-                "args": [
-                    "/opt/sandbox/reconcile_postdeploy.py",
-                    "/workspace/approved-request.json",
-                ],
+                "args": ["/opt/sandbox/reconcile_postdeploy.py", "/workspace/approved-request.json"],
                 "env": common_env,
             },
         ],
@@ -472,6 +551,7 @@ def provision():
         payload, raw = download_approved_request(request_uri, int(body["generation"]), body["sha256"])
         if payload["request_id"] != request_id:
             raise ValueError("request_id does not match approved JSON")
+        validate_against_applied(payload, load_applied_request(payload["task"]["name"]))
         bundle_prefix, manifest = assemble_bundles(payload, raw)
         operation, duplicate = start_build_once(payload, request_uri, bundle_prefix)
     except (KeyError, TypeError, ValueError) as error:

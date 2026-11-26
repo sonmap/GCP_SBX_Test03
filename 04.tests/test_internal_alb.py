@@ -1,10 +1,10 @@
+import copy
 import importlib.util
-import json
-import re
-import os
 import unittest
 from pathlib import Path
 from unittest import mock
+
+from request_fixtures import make_request
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("reconcile", ROOT / "03.sandbox_deploy/03.3.gke/reconcile_postdeploy.py")
@@ -12,81 +12,89 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 PROJECT = "gcp-sbx-edp-gke01"
 REGION = "asia-northeast3"
-ENV = {"GCP_REGION": REGION, "SHARED_NETWORK_URI": "projects/gcp-prod-edp-hub-vpchost/global/networks/vpc-prod-edp-hub"}
+ENV = {"GCP_REGION": REGION}
+DEFAULT = f"projects/{PROJECT}/regions/{REGION}/backendServices/bes-default"
 
 
-class InternalAlbTests(unittest.TestCase):
-    @mock.patch.dict(os.environ,{'SBX_GKE_PROJECT':PROJECT})
-    def test_dedicated_cross_project_ksa_annotation_is_verified(self):
-        request={'task':{'name':'sbx03'},'gke':{'namespace':'sbx03'},'project':{'project_id':'gcp-sbx-edp-sbx03'},'identity':{'create_jupyter_gsa':True}}
-        email='gsa-jupyter-sbx03@gcp-sbx-edp-sbx03.iam.gserviceaccount.com'
-        with mock.patch.object(module,'run',return_value=email):
-            module.verify_workload_identity(request,ENV)
-        with mock.patch.object(module,'run',return_value='sbx-manager@'+PROJECT+'.iam.gserviceaccount.com'):
-            with self.assertRaisesRegex(RuntimeError,'KSA/GSA mismatch'):module.verify_workload_identity(request,ENV)
+def uri(name):
+    return f"projects/{PROJECT}/regions/{REGION}/backendServices/{name}"
 
-    def test_health_and_backend_are_regional_and_internal(self):
-        neg = {"name": "neg-sbx01", "zone": REGION + "-a", "self_link": f"projects/{PROJECT}/zones/{REGION}-a/networkEndpointGroups/neg-sbx01"}
-        with mock.patch.object(module, "gcloud_describe_or_none", side_effect=[None, None, {"backends": []}]) as describe, mock.patch.object(module, "gcloud", return_value="") as cloud:
-            hc = module.ensure_health_check(PROJECT, "sbx01", ENV)
-            module.ensure_backend_service(PROJECT, "sbx01", hc, [neg], ENV)
-        for call in describe.call_args_list:
-            self.assertIn("--region=" + REGION, call.args[0])
-            self.assertNotIn("--global", call.args[0])
+
+class UrlMapRouteTests(unittest.TestCase):
+    def test_path_scheme_shares_one_host_between_tasks(self):
+        config = {"defaultService": DEFAULT}
+        self.assertTrue(module.merge_route(config, "sbx.sonmap.net", "/general/rsch/", uri("bes-rsch")))
+        self.assertTrue(module.merge_route(config, "sbx.sonmap.net", "/general/rsce/", uri("bes-rsce")))
+        self.assertEqual(len(config["hostRules"]), 1)
+        matcher = config["pathMatchers"][0]
+        self.assertEqual(matcher["defaultService"], DEFAULT)
+        self.assertEqual(matcher["pathRules"][0]["paths"], ["/general/rsch", "/general/rsch/*"])
+        self.assertEqual(len(matcher["pathRules"]), 2)
+
+    def test_rerun_changes_nothing(self):
+        config = {"defaultService": DEFAULT}
+        module.merge_route(config, "sbx.sonmap.net", "/general/rsch/", uri("bes-rsch"))
+        before = copy.deepcopy(config)
+        full = "https://www.googleapis.com/compute/v1/" + uri("bes-rsch")
+        config["pathMatchers"][0]["pathRules"][0]["service"] = full
+        before["pathMatchers"][0]["pathRules"][0]["service"] = full
+        self.assertFalse(module.merge_route(config, "sbx.sonmap.net", "/general/rsch/", uri("bes-rsch")))
+        self.assertEqual(config, before)
+
+    def test_host_scheme_gives_the_host_to_one_backend(self):
+        config = {"defaultService": DEFAULT}
+        self.assertTrue(module.merge_route(config, "rsch.general.sonmap.net", "/", uri("bes-rsch")))
+        self.assertEqual(config["pathMatchers"][0]["defaultService"], uri("bes-rsch"))
+        self.assertFalse(module.merge_route(config, "rsch.general.sonmap.net", "/", uri("bes-rsch")))
+
+    def test_another_tasks_route_is_never_overwritten(self):
+        config = {"defaultService": DEFAULT}
+        module.merge_route(config, "sbx.sonmap.net", "/general/rsch/", uri("bes-rsch"))
+        with self.assertRaisesRegex(RuntimeError, "already routed"):
+            module.merge_route(config, "sbx.sonmap.net", "/general/rsch/", uri("bes-other"))
+        module.merge_route(config, "rsch.general.sonmap.net", "/", uri("bes-rsch"))
+        with self.assertRaisesRegex(RuntimeError, "already routed"):
+            module.merge_route(config, "rsch.general.sonmap.net", "/", uri("bes-other"))
+
+
+class BackendTests(unittest.TestCase):
+    def test_backend_is_regional_internal_and_keeps_websockets_open(self):
+        neg = {"name": "neg-1", "zone": REGION + "-a", "self_link": f"projects/{PROJECT}/zones/{REGION}-a/networkEndpointGroups/neg-1"}
+        with mock.patch.object(module, "gcloud_describe_or_none", side_effect=[None, {"backends": []}]), \
+                mock.patch.object(module, "gcloud", return_value="") as cloud:
+            module.ensure_backend_service(PROJECT, "bes-sbx-rsch-jupyter", "hc-shared", [neg], ENV)
         calls = [call.args for call in cloud.call_args_list]
+        create = next(args for args in calls if args[:3] == ("compute", "backend-services", "create"))
+        self.assertIn("--load-balancing-scheme=INTERNAL_MANAGED", create)
+        self.assertIn("--health-checks=hc-shared", create)
+        self.assertIn("--timeout=86400s", create)
         for args in calls:
             self.assertIn("--region=" + REGION, args)
-            self.assertNotIn("--global", args)
-        backend = next(args for args in calls if args[:3] == ("compute", "backend-services", "create"))
-        self.assertIn("--load-balancing-scheme=INTERNAL_MANAGED", backend)
-        self.assertFalse(any(arg.startswith("--network=") for arg in backend))
-        self.assertIn("--health-checks-region=" + REGION, backend)
+        self.assertTrue(any(args[:3] == ("compute", "backend-services", "add-backend") for args in calls))
 
-    def test_url_map_uses_full_regional_backend_uri(self):
-        uri = f"projects/{PROJECT}/regions/{REGION}/backendServices/bes-jupyter-sbx01"
-        matcher = {"name": "sbx01", "defaultService": uri}
-        host = {"hosts": ["jupyter-sbx01.sonmap.net"], "pathMatcher": "sbx01"}
-        maps = iter([{}, {"pathMatchers": [matcher]}, {"pathMatchers": [matcher], "hostRules": [host]}])
-        def response(*args, **kwargs):
-            if args[:3] == ("compute", "url-maps", "describe"):
-                return json.dumps(next(maps))
-            return ""
-        with mock.patch.object(module, "gcloud", side_effect=response) as cloud:
-            module.reconcile_url_map(PROJECT, "urlmap-alb-sbxtest01-shared", "sbx01", host["hosts"][0], "bes-jupyter-sbx01", ENV)
-        calls = [call.args for call in cloud.call_args_list]
-        self.assertTrue(any("--default-service=" + uri in args for args in calls))
-        self.assertTrue(all("--region=" + REGION in args for args in calls))
-        self.assertFalse(module.expected_backend({"defaultService": f"projects/{PROJECT}/global/backendServices/bes-jupyter-sbx01"}, uri))
+    def test_attached_neg_is_not_detached_and_reattached(self):
+        link = f"projects/{PROJECT}/zones/{REGION}-a/networkEndpointGroups/neg-1"
+        neg = {"name": "neg-1", "zone": REGION + "-a", "self_link": link}
+        current = {"loadBalancingScheme": "INTERNAL_MANAGED", "protocol": "HTTP",
+                   "backends": [{"group": "https://www.googleapis.com/compute/v1/" + link}]}
+        with mock.patch.object(module, "gcloud_describe_or_none", return_value=current), \
+                mock.patch.object(module, "gcloud", return_value="") as cloud:
+            module.ensure_backend_service(PROJECT, "bes-sbx-rsch-jupyter", "hc-shared", [neg], ENV)
+        cloud.assert_not_called()
 
-    def test_incompatible_existing_backend_is_rejected(self):
-        for current in [{"loadBalancingScheme": "EXTERNAL"}, {"loadBalancingScheme": "INTERNAL_MANAGED", "protocol": "HTTPS"}]:
-            with self.subTest(current=current), mock.patch.object(module, "gcloud_describe_or_none", return_value=current), mock.patch.object(module, "gcloud") as cloud:
-                with self.assertRaises(RuntimeError):
-                    module.ensure_backend_service(PROJECT, "sbx01", "hc", [], ENV)
-                cloud.assert_not_called()
+    def test_one_backend_per_container(self):
+        request = make_request(migrated=True, containers=3)
+        names = {module.backend_name(request["task"]["name"], c["name"]) for c in request["workload"]["containers"]}
+        self.assertEqual(len(names), 3)
 
-    def test_permission_failure_is_not_missing_resource(self):
-        result = mock.Mock(returncode=1, stdout="", stderr="Could not fetch resource: Required permission missing (403)")
-        with mock.patch.object(module.subprocess, "run", return_value=result):
-            with self.assertRaises(RuntimeError):
-                module.gcloud_describe_or_none(("compute", "backend-services", "describe", "bes"))
-
-    def test_foundation_uses_shared_vpc_internal_vip_and_proxy_subnet(self):
-        guide = (ROOT / "02.infra-setup/infra-setup-commend.md").read_text()
-        guide = re.sub(r'\\\n[ \t]+', '', guide)
-        network = guide.split("\n## 2. Shared VPC와 네트워크\n", 1)[1].split("\n## ", 1)[0]
-        foundation = guide.split("\n## 3. 공통 기반\n", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("--purpose=REGIONAL_MANAGED_PROXY --role=ACTIVE", network)
-        self.assertIn("export ILB_VIP_CIDR=172.31.96.0/27", network)
-        self.assertIn("export ILB_PROXY_CIDR=172.31.111.64/26", network)
-        self.assertIn("--source-ranges=\"${ILB_PROXY_CIDR}\"", network)
-        for line in foundation.splitlines():
-            if line.startswith("gcloud compute ") and any(resource in line for resource in ["addresses ", "backend-services ", "health-checks ", "url-maps ", "target-http-proxies ", "target-https-proxies ", "forwarding-rules ", "ssl-certificates "]):
-                self.assertIn('--region="${REGION}"', line)
-                self.assertNotIn("--global", line)
-        self.assertNotIn("--load-balancing-scheme=EXTERNAL", foundation)
-        self.assertIn("--purpose=SHARED_LOADBALANCER_VIP", foundation)
-        self.assertIn('subnetworks/${ILB_VIP_SUBNET}', foundation)
+    def test_workload_identity_must_point_at_the_task_service_account(self):
+        request = make_request(migrated=True)
+        email = request["identity"]["jupyter_gsa"]["email"]
+        with mock.patch.object(module, "run", return_value=email):
+            module.verify_workload_identity(request, ENV)
+        with mock.patch.object(module, "run", return_value="other@x.iam.gserviceaccount.com"):
+            with self.assertRaisesRegex(RuntimeError, "KSA/GSA mismatch"):
+                module.verify_workload_identity(request, ENV)
 
 
 if __name__ == "__main__":

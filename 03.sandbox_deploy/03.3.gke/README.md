@@ -1,12 +1,16 @@
-# Sandbox GKE·Jupyter 배포 실행 도구
+# Runner — 워크로드와 ALB
 
-Cloud Build의 Private Pool 컨테이너 안에서 실행하는 도구입니다.
+Private Pool 의 Cloud Build 가 이 이미지로 두 스크립트를 차례로 실행합니다.
 
-| 파일 | 역할 |
+| 파일 | 하는 일 |
 |---|---|
-| apply_gke_workload.py | Namespace·KSA·RBAC·Quota·JupyterHub 설치 |
-| reconcile_postdeploy.py | Workload Identity 확인·NEG·Backend·공통 ALB 경로 연결 |
-| Dockerfile | 위 도구와 gcloud/kubectl/Helm 등을 담는 이미지 |
-| requirements.txt | Python 라이브러리 목록 |
+| `run_workload.py` | 요청 JSON → tfvars → `terraform plan` → 삭제 검사 → `apply` ([50-workload](../03.2.terraform/deployments/50-workload)) |
+| `reconcile_postdeploy.py` | 컨테이너별 백엔드 서비스 + NEG 연결, URL Map 규칙 추가, 상태 확인, 적용 기록 |
+| `Dockerfile` | gcloud · kubectl · Terraform · Provider 를 담은 Runner 이미지 |
+| `cloudbuild/` | 릴리스 게시 (이미지 빌드, Terraform ZIP 게시) |
 
-신청을 받는 Cloud Run API와 다른 역할입니다. 요청 접수는 `03.sandbox_deploy/03.1.request/`, 사용자 Notebook 실행 이미지는 `03.sandbox_deploy/03.3.gke/notebook-image/`에 있습니다.
+**삭제 검사** · plan 이 Namespace · PV · PVC · Service · KSA · Workload Identity 바인딩을 지우거나 교체하려 하면 적용하지 않고 멈춥니다.
+
+**OAuth 값** · Secret Manager 에서 읽어 `kubectl` 로 과제 Namespace 에 넣습니다. Terraform State 에는 들어가지 않습니다.
+
+**URL Map** · 모든 과제가 하나를 같이 씁니다. 내보내기 → 규칙 추가 → 가져오기 순서이며, 그 사이 다른 과제가 바꾸면 fingerprint 불일치로 실패하고 다시 시도합니다.

@@ -52,8 +52,8 @@ with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
             continue
         if path.name.endswith(".auto.tfvars") or path.name.endswith(".auto.tfvars.json"):
             continue
-        # Keep the ZIP's internal layout compatible with published API images.
-        archive_path = pathlib.Path("08.sandbox_setup_02_terraform/deployments") / relative
+        # ZIP layout: deployments/<stage>/*.tf (read by 03.1.request/main.py).
+        archive_path = pathlib.Path("deployments") / relative
         output.write(path, archive_path)
 PY
 

@@ -1,0 +1,77 @@
+{
+  "schema_version": "2.0",
+  "request_id": "REQ-EXAMPLE-MIGRATED-MULTI-CONTAINER",
+  "approval": {
+    "status": "APPROVED",
+    "approval_id": "test-approval",
+    "approved_at": "2026-01-01T00:00:00Z"
+  },
+  "action": "CREATE",
+  "task": {
+    "name": "rsch",
+    "display_name": "Local test assignment",
+    "expires_on": "2026-12-31",
+    "origin": "MIGRATED"
+  },
+  "identity": {
+    "group_email": "pgrp-gcp-dev-rsch@sonmap.net",
+    "manage_group": false,
+    "jupyter_gsa": {
+      "email": "sa-sbx-rsch-notebook-1-user@gcp-sbx-edp-rsch.iam.gserviceaccount.com",
+      "create": false
+    }
+  },
+  "project": {
+    "manage": false,
+    "project_id": "gcp-sbx-edp-rsch"
+  },
+  "data": {
+    "manage": false
+  },
+  "gke": {
+    "project_id": "gcp-sbx-edp-gke01",
+    "cluster_name": "gke-sbx-main-an3",
+    "location": "asia-northeast3"
+  },
+  "workload": {
+    "area": "general",
+    "namespace": "sbx-general-rsch",
+    "running": true,
+    "cpu": 8,
+    "memory_gib": 64,
+    "storage": {
+      "size_gb": 100,
+      "zone": "asia-northeast3-a",
+      "existing_disk": "disk-sbx-rsch-data"
+    },
+    "containers": [
+      {
+        "name": "jupyter-1",
+        "image": "asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/rsch-jupyter@sha256:abababababababababababababababababababababababababababababababab",
+        "hub_port": 8081,
+        "host": "sbx.sonmap.net",
+        "base_path": "/general/rsch/v1/"
+      },
+      {
+        "name": "jupyter-2",
+        "image": "asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/rsch-jupyter@sha256:abababababababababababababababababababababababababababababababab",
+        "hub_port": 8082,
+        "host": "sbx.sonmap.net",
+        "base_path": "/general/rsch/v2/"
+      },
+      {
+        "name": "jupyter-3",
+        "image": "asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/rsch-jupyter@sha256:abababababababababababababababababababababababababababababababab",
+        "hub_port": 8083,
+        "host": "sbx.sonmap.net",
+        "base_path": "/general/rsch/v3/"
+      }
+    ]
+  },
+  "source": {
+    "release_id": "git-000000000000",
+    "archive_uri": "gs://gcp-sbx-edp-gke01-sbxtest01-bundles/platform-releases/git-000000000000/sandbox-source.zip",
+    "generation": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

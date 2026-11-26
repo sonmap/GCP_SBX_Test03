@@ -1,0 +1,93 @@
+# JupyterHub config mounted over the image's own file (hub_config = MANAGED).
+#
+# REFERENCE TEMPLATE. It reproduces the structure of the config used on the
+# notebook VMs (generic OAuth login, per-user Linux account created in
+# pre_spawn_hook, sudospawner) with the three things that must differ on GKE:
+#   1. public URL / base_url / callback come from the ALB route, not VM IP:port
+#   2. OAuth client id and secret are read from mounted files, not written here
+#   3. internal ports are unique so several Hubs can share one Pod
+# Diff it against the file inside the task image before the first real use.
+import json
+import os
+import pwd
+import subprocess
+import urllib.request
+
+from oauthenticator.generic import GenericOAuthenticator
+
+PUBLIC_URL = "${public_url}"
+OAUTH_BASE = "${oauth_base_url}"
+PORTAL_MEMBERS_API = "${portal_members_api}"
+TASK_PROJECT = "${task_project_id}"
+DATA_ROOT = "${data_mount_path}"
+ADMIN_USERS = set(json.loads('${admin_users}'))
+
+
+def _secret(name):
+    with open(os.path.join("/etc/jupyterhub/oauth", name), encoding="utf-8") as stream:
+        return stream.read().strip()
+
+
+class CustomGenericOAuth(GenericOAuthenticator):
+    def normalize_username(self, username):
+        return username.split("@")[0].lower()
+
+
+def _task_members():
+    if not PORTAL_MEMBERS_API:
+        return None
+    with urllib.request.urlopen(PORTAL_MEMBERS_API + "?gcpPrjId=" + TASK_PROJECT, timeout=10) as response:
+        payload = json.load(response)
+    members = payload if isinstance(payload, list) else payload.get("data", [])
+    return {str(item).split("@")[0].lower() for item in members}
+
+
+def create_user(spawner):
+    """Create the Linux account on first login. Home lives on the data disk, so
+    it survives Pod restarts; the account itself is recreated when missing."""
+    username = spawner.user.name
+    members = _task_members()
+    if members is not None and username not in members | ADMIN_USERS:
+        raise PermissionError(username + " is not a member of this task")
+    home = os.path.join(DATA_ROOT, username)
+    try:
+        pwd.getpwnam(username)
+    except KeyError:
+        command = ["sudo", "useradd", "-m", "-d", home, "-g", "jupyterhub"]
+        # /etc/passwd lives in the container and is lost when the Pod restarts,
+        # but the files on the data disk keep their numeric owner. Recreate the
+        # account with the UID that already owns the home directory.
+        if os.path.isdir(home) and os.stat(home).st_uid >= 1000:
+            command += ["-u", str(os.stat(home).st_uid)]
+        subprocess.check_call(command + [username])
+    if not os.path.isdir(home):
+        subprocess.check_call(["sudo", "mkdir", "-p", home])
+    if os.stat(home).st_uid != pwd.getpwnam(username).pw_uid:
+        subprocess.check_call(["sudo", "chown", "-R", username + ":jupyterhub", home])
+        subprocess.check_call(["sudo", "chmod", "700", home])
+    spawner.environment["HOME"] = home
+    spawner.notebook_dir = home
+
+
+c = get_config()  # noqa: F821
+
+c.JupyterHub.bind_url = "http://0.0.0.0:${hub_port}${base_url}"
+c.JupyterHub.hub_port = ${hub_internal_port}
+c.ConfigurableHTTPProxy.api_url = "http://127.0.0.1:${proxy_api_port}"
+
+c.JupyterHub.authenticator_class = CustomGenericOAuth
+c.GenericOAuthenticator.client_id = _secret("client_id")
+c.GenericOAuthenticator.client_secret = _secret("client_secret")
+c.GenericOAuthenticator.oauth_callback_url = PUBLIC_URL + "hub/oauth_callback"
+c.GenericOAuthenticator.authorize_url = OAUTH_BASE + "/authorize"
+c.GenericOAuthenticator.token_url = OAUTH_BASE + "/token"
+c.GenericOAuthenticator.userdata_url = OAUTH_BASE + "/userinfo"
+c.GenericOAuthenticator.scope = ["openid", "email", "profile"]
+c.GenericOAuthenticator.username_claim = "email"
+c.GenericOAuthenticator.allow_all = True
+c.GenericOAuthenticator.logout_redirect_url = PUBLIC_URL
+c.Authenticator.admin_users = ADMIN_USERS
+
+c.JupyterHub.spawner_class = "sudospawner.SudoSpawner"
+c.Spawner.pre_spawn_hook = create_user
+c.Spawner.default_url = "/lab"

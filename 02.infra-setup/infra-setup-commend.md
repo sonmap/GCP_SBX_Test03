@@ -1,12 +1,12 @@
 # 1차 인프라 구축
 
-관리 VM `infra-son01`의 Test02 저장소 루트에서 작업합니다. Sandbox 프로젝트팀은 플랫폼 프로젝트를 관리합니다. Shared VPC 운영팀은 기존 호스트의 네트워크와 IAM 변경 요청을 처리하고, 필요한 경우 Private Pool 최초 생성을 담당합니다. 각 터미널에서 로그인 계정과 대상 프로젝트를 확인하고 필요한 명령을 한 줄씩 실행합니다.
+관리 VM `infra-son01`의 Test03 저장소 루트에서 작업합니다. Sandbox 프로젝트팀은 플랫폼 프로젝트를 관리합니다. Shared VPC 운영팀은 기존 호스트의 네트워크와 IAM 변경 요청을 처리하고, 필요한 경우 Private Pool 최초 생성을 담당합니다. 각 터미널에서 로그인 계정과 대상 프로젝트를 확인하고 필요한 명령을 한 줄씩 실행합니다.
 
-**Private Pool 적용 시점** · 수동 Helm 설치만 할 때는 Pool 구성을 보류할 수 있습니다. `sbx03` 자동 배포를 실행할 때는 3-17절에서 Pool을 준비하고 GKE 접속을 확인합니다.
+**Private Pool** · 과제 자동화가 Private Pool 에서 GKE 로 접속하므로 3-17절에서 Pool 을 준비하고 접속을 확인합니다.
 
 | 범위 | 명령서의 기본값 |
 |---|---|
-| 실행 위치 | 관리 VM `infra-son01`의 Test02 저장소 루트 |
+| 실행 위치 | 관리 VM `infra-son01`의 Test03 저장소 루트 |
 | 플랫폼 프로젝트 | `SBX_GKE_PROJECT=gcp-sbx-edp-gke01` · GKE, ALB, Cloud Build, Cloud Run, Workflows, AR, GCS |
 | Shared VPC 호스트 | `VPC_HOST_PROJECT=gcp-prod-edp-hub-vpchost` · VPC, 서브넷, 방화벽, PSA |
 | 로그인 계정 | `ADMIN_ACCOUNT=son@sonmap.net`, `VPC_ADMIN_ACCOUNT=admin@sonmap.net`, `AR_ACCOUNT=son@sonmap.net` |
@@ -20,11 +20,11 @@
 |---|---|
 | 준비 | [공통 변수](#0-공통-변수) |
 | 공통 인프라 | [API·IAM](#1-api와-관리자-권한) → [Shared VPC](#2-shared-vpc와-네트워크) → [서브넷 IAM](#2-2-서브넷별-iam) → [GKE·AR·ALB](#3-공통-기반) |
-| JupyterHub 구축·검증 | [차트 반입과 이미지 준비](#4-jupyterhub-이미지-준비와-수동-설치) → [수동 기동 확인](#4-4-jupyterhub-수동-설치와-기동-확인) → [과제 HTTPS·로그인 검증](#4-5-과제용-내부-https-및-로그인-검증) |
+| 과제 Pod 실행 준비 | [State 버킷 · StorageClass · 헬스 체크 · OAuth 값 · 기존 과제 권한](#4-과제-pod-실행-준비) |
 | 기존 과제별 자동 배포 준비 | [Workspace 그룹스 관리자 역할](#1-4-2-google-workspace-그룹스-관리자-역할-부여) · [Workspace 고객 ID](#5-기존-과제별-자동-배포용-workspace-설정) · [Private Pool 점검](reference/cloudbuild-private-gke-vpn-design.md) |
-| 2차 배포 | [공유 그룹 및 과제 배포](../03.sandbox_deploy/README.md#배포-흐름) · [기존 과제별 Workflows](../03.sandbox_deploy/03.1.request/legacy-deploy.md) |
+| 2차 배포 | [과제 자동화](../03.sandbox_deploy/README.md) · [기존 과제 이전](../05.migration/README.md) |
 
-그룹 공유 PoC만 구성하는 환경에서 공통 자원을 준비할 때는 기존 자동 배포용 Cloud Run·Workflows와 Google OAuth 구간을 구분해 적용합니다. 기존 환경에서는 자원 조회 결과를 확인한 뒤 필요한 생성·갱신 명령만 실행합니다.
+기존 환경에서는 자원 조회 결과를 확인한 뒤 필요한 생성·갱신 명령만 실행합니다.
 
 <a name="0-공통-변수"></a>
 
@@ -784,7 +784,7 @@ gcloud compute firewall-rules list --project="$HOST" --account="$VPC_ADMIN_ACCOU
 # 수행 위치: infra-son01 또는 Cloud Shell | 수행 계정: VPC_ADMIN_ACCOUNT (예: admin@sonmap.net) | 대상: gcp-prod-edp-hub-vpchost
 gcloud compute firewall-rules create fw-sbxtest01-alb-hc \
   --project="$HOST" --network="$NETWORK" --account="$VPC_ADMIN_ACCOUNT" \
-  --direction=INGRESS --allow=tcp:8000 \
+  --direction=INGRESS --allow=tcp:8080-8089 \
   --source-ranges=35.191.0.0/16,130.211.0.0/22 --destination-ranges="$POD_CIDR"
 ```
 
@@ -796,7 +796,7 @@ gcloud compute firewall-rules create fw-sbxtest01-alb-hc \
 # 수행 위치: infra-son01 또는 Cloud Shell | 수행 계정: VPC_ADMIN_ACCOUNT (예: admin@sonmap.net) | 대상: gcp-prod-edp-hub-vpchost
 gcloud compute firewall-rules create fw-sbxtest01-ilb-proxy \
   --project="$HOST" --network="$NETWORK" --account="$VPC_ADMIN_ACCOUNT" \
-  --direction=INGRESS --allow=tcp:8000 \
+  --direction=INGRESS --allow=tcp:8080-8089 \
   --source-ranges="$PROXY_CIDR" --destination-ranges="$POD_CIDR"
 ```
 
@@ -1682,14 +1682,14 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
 
 <a name="19-1-수동-작업--infra-son01에서-helm-차트-반입-및-이미지-빌드"></a>
 
-#### 3-19-1. 수동 작업 · infra-son01에서 Helm 차트 반입 및 이미지 빌드
+#### 3-19-1. 수동 작업 · infra-son01에서 이미지 빌드
 
-**1. Helm 차트 반입** · [4-1절 Helm 차트 수동 반입](#4-1-infra-son01에서-helm-차트-수동-반입) 명령을 먼저 실행합니다. `infra-son01`에서 `son@sonmap.net`으로 AR에 로그인하고, 공식 저장소에서 JupyterHub `4.2.0`을 내려받아 `helm push`로 게시합니다. `helm show chart`에서 이미 확인되는 버전은 재사용합니다.
+**1. 준비물** · Helm 차트는 쓰지 않습니다. Runner 이미지를 빌드할 때 Terraform 과 Provider 를 내려받으므로, 빌드하는 곳에서 `releases.hashicorp.com` 과 `registry.terraform.io` 에 닿아야 합니다.
 
-**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test02 저장소 루트에서 실행합니다. Docker가 설치되어 있고, `son@sonmap.net`에 AR 업로드 권한이 있어야 합니다.
+**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test03 저장소 루트에서 실행합니다. Docker가 설치되어 있고, `son@sonmap.net`에 AR 업로드 권한이 있어야 합니다.
 
 ```bash
-# 수행 위치: infra-son01, Test02 저장소 루트 | 수행 계정: son@sonmap.net (AR 인증)
+# 수행 위치: infra-son01, Test03 저장소 루트 | 수행 계정: son@sonmap.net (AR 인증)
 export AR_ACCOUNT="son@sonmap.net"
 export AR_HOST="asia-northeast3-docker.pkg.dev"
 export AR_REPO="${AR_HOST}/gcp-sbx-edp-gke01/ar-sbxtest01-platform"
@@ -1701,7 +1701,7 @@ gcloud auth print-access-token --account="$AR_ACCOUNT" |
 로그인이 성공하면 두 이미지를 빌드합니다.
 
 ```bash
-# 수행 위치: infra-son01, Test02 저장소 루트 | 수행 계정: VM 로그인 사용자
+# 수행 위치: infra-son01, Test03 저장소 루트 | 수행 계정: VM 로그인 사용자
 docker build -f 03.sandbox_deploy/03.3.gke/Dockerfile \
   -t "${AR_REPO}/sbxtest01-automation-runner:bootstrap" .
 
@@ -1726,7 +1726,7 @@ gcloud artifacts docker images list "$AR_REPO" \
 
 #### 3-19-2. 자동 작업 · Cloud Build로 bootstrap 이미지 빌드 및 게시
 
-`infra-son01`의 Test02 저장소 루트에서 기존 Cloud Build 명령을 실행합니다. 이 명령은 bootstrap 이미지 2개를 게시합니다. JupyterHub Helm 차트는 [4-1절 Helm 차트 수동 반입](#4-1-infra-son01에서-helm-차트-수동-반입)으로 준비합니다. 빌드가 `SUCCESS`이고 두 이미지의 `bootstrap` 태그가 확인되면 3-20절으로 진행합니다.
+`infra-son01`의 Test03 저장소 루트에서 기존 Cloud Build 명령을 실행합니다. 이 명령은 bootstrap 이미지 2개를 게시합니다. 빌드가 `SUCCESS`이고 두 이미지의 `bootstrap` 태그가 확인되면 3-20절으로 진행합니다.
 
 ```bash
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER} | 워크로드 실행 ${TF_MANAGER}
@@ -2150,7 +2150,7 @@ flowchart TD
 
 2. **DNS와 인증서 준비** · 3-32-2절에서 새 DNS 승인 생성·조회 명령을 실행합니다. 외부 요청서에는 새 CNAME 이름·대상을, 내부 요청서에는 새 FQDN과 확인된 ALB VIP를 입력합니다. 3-32-3절에서 새 인증서를 만들고 `ACTIVE`를 확인합니다.
 3. **프록시와 그룹 라우팅 반영** · 3-33-2절에서 새 인증서를 적용합니다. 공유 프록시가 함께 서비스하는 모든 호스트의 인증서를 `CERT_REFS`에 포함합니다. 승인된 `group.json`의 `domain`만 새 FQDN으로 바꾸고, 기존 `tasks`를 포함한 전체 그룹 JSON으로 [2차 배포 문서 7-2절](../03.sandbox_deploy/README.md#7-2-그룹-json-게시와-실행)을 다시 실행합니다. URL Map의 새 호스트 규칙과 그룹 백엔드 상태를 확인합니다.
-4. **접속 재검증** · 사내 PC에서 운영 호스트의 DNS 응답과 HTTPS 인증서를 확인하고 [4-5절](#4-5-과제용-내부-https-및-로그인-검증)에 따라 로그인과 Notebook 실행을 검증합니다. 기존 과제별 Google OAuth 경로를 사용하면 새 HTTPS 콜백 URL도 등록하고 로그인까지 확인합니다.
+4. **접속 재검증** · 사내 PC에서 운영 호스트의 DNS 응답과 HTTPS 인증서를 확인하고 로그인과 Notebook 실행을 검증합니다. 호스트를 바꿨다면 로그인 서버에 새 콜백 주소도 등록합니다.
 
 전환 때문에 Shared VPC, GKE, 과제 프로젝트 또는 그룹을 새로 구축할 필요는 없습니다. 새 호스트의 **공개 CNAME 승인, 내부 A 레코드, 인증서, URL Map, 로그인**을 확인합니다. PoC용 인증서와 DNS 승인은 참조하는 프록시와 사용자 경로가 사라진 것을 확인한 뒤 정리합니다.
 
@@ -2259,487 +2259,114 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-https --project="
 
 </details>
 
-## 4. JupyterHub 이미지 준비와 수동 설치
+## 4. 과제 Pod 실행 준비
 
 <details>
 <summary>내용 펼치기 / 접기</summary>
 
-<a name="7-chart와-기본-이미지-미러링"></a>
+과제 자동화([2차 문서](../03.sandbox_deploy/README.md))가 쓰는 공통 자원을 **한 번** 만듭니다. Helm 차트와 Hub·Proxy 이미지는 쓰지 않습니다. 과제 Pod 는 기존 과제 이미지를 그대로 실행합니다.
 
-<a name="-7-chart와-기본-이미지-미러링"></a>
+| 절 | 만드는 것 | 쓰는 곳 |
+|---|---|---|
+| 4-1 | Terraform State 버킷 | `50-workload` 의 과제별 State |
+| 4-2 | StorageClass `sbx-static-pd` | 기존 디스크를 붙이는 정적 PV |
+| 4-3 | 공용 TCP 헬스 체크 | 과제별 백엔드 서비스 |
+| 4-4 | 방화벽 포트 확인 | ALB → Pod `8080-8089` |
+| 4-5 | OAuth 값 등록 | Hub 로그인 (3-13 ~ 3-16 의 Secret) |
+| 4-6 | 기존 과제 프로젝트 권한 | 이전 과제의 Workload Identity · 이미지 · 스냅샷 |
 
-<a name="infra-son01에서-helm-차트-수동-반입"></a>
-
-<a name="7-1-infra-son01에서-helm-차트-수동-반입"></a>
-
-### 4-1. infra-son01에서 Helm 차트 수동 반입
-
-AR에 승인된 차트 버전이 있는지 먼저 확인합니다. 해당 버전이 없거나 갱신이 필요할 때만 다운로드와 업로드를 실행합니다.
-
-승인된 관리 VM `infra-son01`에 로그인한 뒤, 같은 Bash 창에서 다음 명령을 순서대로 실행합니다. VM에는 Helm 3과 gcloud가 필요하며, 공식 Helm 저장소와 AR에 HTTPS로 접근할 수 있어야 합니다. AR은 Docker 형식 저장소를 사용합니다. `AR_ACCOUNT`는 대상 저장소에서 읽기·업로드 권한이 있는 gcloud 계정으로 지정합니다. 차트 반입은 관리 VM에서 완료하므로 GKE 접속과 Cloud Build 제출이 필요 없습니다.
-
-<a name="7-1-1-대상-설정-및-ar-로그인"></a>
-
-#### 4-1-1. 대상 설정 및 AR 로그인
+### 4-1. Terraform State 버킷
 
 ```bash
-CHART_VERSION=4.2.0
-CHART_SOURCE=https://hub.jupyter.org/helm-chart/
-AR_HOST=asia-northeast3-docker.pkg.dev
-AR_REPO="oci://${AR_HOST}/gcp-sbx-edp-gke01/ar-sbxtest01-platform"
-JUPYTER_CHART_URI="${AR_REPO}/jupyterhub"
-AR_ACCOUNT=son@sonmap.net
-
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT}의 AR ar-sbxtest01-platform | 계정 $AR_ACCOUNT
-( set -o pipefail; gcloud auth print-access-token --account="$AR_ACCOUNT" | helm registry login "$AR_HOST" --username oauth2accesstoken --password-stdin )
+# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}
+export TF_STATE_BUCKET="${SBX_GKE_PROJECT}-sbxtest01-tfstate"
+gcloud storage buckets create "gs://${TF_STATE_BUCKET}" --project="${SBX_GKE_PROJECT}" \
+  --location="${REGION}" --uniform-bucket-level-access --public-access-prevention \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
+gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
+gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+  --member="serviceAccount:${TF_MANAGER}" --role=roles/storage.objectAdmin \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
 ```
 
-로그인이 성공한 뒤 대상 차트 버전을 조회합니다.
+State 경로는 `tasks/<과제>/50-workload` 입니다. 버전 관리를 켜 두어 잘못된 적용 뒤 이전 State 로 되돌릴 수 있습니다.
+
+### 4-2. 정적 PV 용 StorageClass
+
+기존 VM 의 data 디스크를 붙일 때 PV 와 PVC 가 같이 쓰는 클래스입니다. 새 디스크를 만들지 않도록 PV 를 이름으로 지정해 붙이며, 이 클래스는 **확장 허용과 보존 정책**을 위해 둡니다.
 
 ```bash
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT}의 AR ar-sbxtest01-platform | 계정 $AR_ACCOUNT의 AR 인증
-helm show chart "$JUPYTER_CHART_URI" --version "$CHART_VERSION"
-```
-
-`name: jupyterhub`와 `version: 4.2.0`이 보이면 게시된 버전을 사용합니다. `Login Succeeded` 이후 `FetchReference` 오류에 `jupyterhub:4.2.0: not found`가 표시되면, 같은 `infra-son01` 터미널에서 7-1-2절 다운로드와 7-1-3절 업로드를 실행합니다. 인증·권한·네트워크 오류는 먼저 해결합니다.
-
-<a name="7-1-2-공식-helm-저장소에서-패키지-다운로드"></a>
-
-#### 4-1-2. 공식 Helm 저장소에서 패키지 다운로드
-
-```bash
-# 실행 위치 infra-son01 | 대상 공식 Helm 저장소 및 VM 로컬 | 계정 VM 로그인 사용자
-CHART_DIR="$(mktemp -d)"
-CHART_PACKAGE="$CHART_DIR/jupyterhub-${CHART_VERSION}.tgz"
-
-helm pull jupyterhub \
-  --repo "$CHART_SOURCE" \
-  --version "$CHART_VERSION" \
-  --destination "$CHART_DIR"
-
-helm show chart "$CHART_PACKAGE"
-```
-
-다운로드한 패키지의 `name: jupyterhub`와 `version: 4.2.0`을 확인합니다.
-
-<a name="7-1-3-내부-ar-업로드-및-검증"></a>
-
-#### 4-1-3. 내부 AR 업로드 및 검증
-
-```bash
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT}의 AR ar-sbxtest01-platform | 계정 $AR_ACCOUNT의 AR 인증
-helm push "$CHART_PACKAGE" "$AR_REPO"
-
-# 업로드가 성공하면 AR에 등록된 차트를 확인합니다.
-helm show chart "$JUPYTER_CHART_URI" --version "$CHART_VERSION"
-```
-
-`helm push`의 대상은 저장소 루트입니다. Helm은 차트 이름과 버전을 패키지의 `Chart.yaml`에서 읽습니다. 배포에는 `oci://asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/jupyterhub`와 `--version 4.2.0`을 사용합니다. 승인된 다른 AR을 사용할 경우 `AR_REPO`와 배포 설정의 차트 URI를 같이 맞춥니다.
-
-<a name="hubproxynotebook-기본-이미지-복사"></a>
-
-<a name="7-2-hubproxynotebook-기본-이미지-복사"></a>
-
-### 4-2. Hub·Proxy·Notebook 기본 이미지 복사
-
-배포에서 참조하는 이미지와 태그가 내부 AR에 없을 때 반입합니다. 수작업과 Cloud Build 중 환경에 맞는 한 경로를 실행합니다. 필요한 버전이 이미 게시돼 있으면 4-3절에서 표준 Notebook 이미지 상태를 확인합니다.
-
-<a name="1-수작업-진행--infra-son01에서-내부-ar로-복사"></a>
-
-<a name="7-2-1-수작업-진행--infra-son01에서-내부-ar로-복사"></a>
-
-#### 4-2-1. 수작업 진행 · infra-son01에서 내부 AR로 복사
-
-**수행 위치** · `infra-son01`  
-**수행 계정** · VM 로그인 사용자, AR 인증은 `son@sonmap.net`
-
-VM에 `skopeo`가 설치되어 있고 `quay.io`와 내부 AR에 접속할 수 있어야 합니다. 아래 명령을 같은 터미널에서 순서대로 실행합니다.
-
-```bash
-export AR_ACCOUNT="son@sonmap.net"
-export AR_HOST="asia-northeast3-docker.pkg.dev"
-export IMAGE_AR="$AR_HOST/gcp-sbx-edp-gke01/ar-sbxtest01-platform"
-
-skopeo --version
-gcloud auth print-access-token --account="$AR_ACCOUNT" |
-  skopeo login "$AR_HOST" --username oauth2accesstoken --password-stdin
-```
-
-로그인이 성공하면 내부 AR에 없는 이미지와 태그만 복사합니다. `--all`은 원본에 여러 플랫폼 이미지가 있을 때 모두 복사합니다.
-
-```bash
-# 1. Hub
-skopeo copy --all \
-  docker://quay.io/jupyterhub/k8s-hub:4.2.0 \
-  "docker://$IMAGE_AR/jupyterhub-k8s-hub:4.2.0"
-
-# 2. Proxy
-skopeo copy --all \
-  docker://quay.io/jupyterhub/configurable-http-proxy:4.6.3 \
-  "docker://$IMAGE_AR/jupyterhub-configurable-http-proxy:4.6.3"
-
-# 3. Notebook 베이스
-skopeo copy --all \
-  docker://quay.io/jupyterhub/k8s-singleuser-sample:4.2.0 \
-  "docker://$IMAGE_AR/jupyterhub-k8s-singleuser-sample:4.2.0"
-```
-
-```bash
-# 수행 위치: infra-son01 | 수행 계정: son@sonmap.net
-gcloud artifacts docker images list "$IMAGE_AR" \
-  --include-tags --account="$AR_ACCOUNT"
-```
-
-세 이미지의 태그가 확인되면 4-3절의 표준 Notebook 이미지 확인으로 진행합니다.
-
-<a name="2-자동-작업--관리형-cloud-build에서-복사"></a>
-
-<a name="7-2-2-자동-작업--관리형-cloud-build에서-복사"></a>
-
-#### 4-2-2. 자동 작업 · 관리형 Cloud Build에서 복사
-
-수작업 대신 관리형 Cloud Build로 반입할 때 아래 명령을 실행합니다. 자동 작업을 이미 시작했다면 완료 후 AR 태그를 확인하고 4-3절로 진행합니다.
-
-```bash
-export SBX_GKE_PROJECT="gcp-sbx-edp-gke01"
-# Test02 저장소 루트에서 실행합니다.
-export ADMIN_ACCOUNT="son@sonmap.net"
-export REGION="asia-northeast3"
-export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
-export TF_MANAGER_RESOURCE="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"
-export BUILD_STAGING_BUCKET="${SBX_GKE_PROJECT}-sbxtest01-build-source"
-unset CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT
-
-export AUTOMATION_IMAGE="${REGION}-docker.pkg.dev/${SBX_GKE_PROJECT}/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap"
-
-# Hub / Proxy / Notebook 기본 이미지를 내부 저장소로 복사합니다.
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER} | 워크로드 실행 ${TF_MANAGER}
-gcloud builds submit --no-source --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
-  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
-  --service-account="${TF_MANAGER_RESOURCE}" \
-  --config=03.sandbox_deploy/03.3.gke/cloudbuild/mirror-jupyterhub-images.yaml \
-  --substitutions="_AUTOMATION_IMAGE=${AUTOMATION_IMAGE}"
-```
-
-기본 이미지 복사 Build가 SUCCESS인지 확인합니다. 외부 다운로드가 가능한 관리형 Build에서 실행합니다.
-
-<a name="8-notebook-표준-이미지-빌드"></a>
-
-<a name="-8-notebook-표준-이미지-빌드"></a>
-
-### 4-3. Notebook 표준 이미지 빌드
-
-배포에서 사용할 승인 이미지가 AR에 있으면 해당 이미지를 사용합니다. 첫 게시 또는 승인된 이미지 변경 시 아래 명령으로 빌드합니다.
-
-운영자는 승인된 관리 VM `infra-son01`의 Test02 저장소 루트에서 Docker BuildKit으로 표준 이미지를 빌드하고 내부 AR에 게시합니다. 표준 이미지는 공통 APT 도구와 Google Cloud CLI, Python 라이브러리, Notebook 시작 스크립트를 포함합니다. Docker 빌드 환경에서 OS APT 저장소, Google Cloud APT 저장소와 내부 AR에 접근할 수 있어야 합니다. VM에서 접근이 허용된 APT 경로를 사용하고, VM 호스트와 Docker 빌드 환경의 접속 여부를 각각 확인합니다.
-
-```bash
-AR_HOST=asia-northeast3-docker.pkg.dev
-AR_REPO="$AR_HOST/gcp-sbx-edp-gke01/ar-sbxtest01-platform"
-AR_ACCOUNT=son@sonmap.net
-BASE_IMAGE="$AR_REPO/jupyterhub-k8s-singleuser-sample:4.2.0"
-IMAGE_TAG=4.2.0-r2-home
-IMAGE="$AR_REPO/jupyterhub-k8s-singleuser-standard:$IMAGE_TAG"
-TARGET_PLATFORM=linux/amd64
-NOTEBOOK_PIP_MODE=index
-```
-
-`TARGET_PLATFORM`은 GKE 대상 노드에 맞춥니다. 예제 태그가 이미 게시되어 있으면 기존 이미지를 사용하거나, 변경 버전에 새로운 승인 태그를 지정합니다. 기존 과제별 배포에서 새 태그를 사용할 경우 사용자 홈 설정도 함께 적용합니다. [이미지 적용 절차](../03.sandbox_deploy/03.3.gke/notebook-image/README.md)
-
-<a name="8-1-docker를-내부-ar에-인증하고-베이스-이미지를-확인"></a>
-
-#### 4-3-1. Docker를 내부 AR에 인증하고 베이스 이미지를 확인
-
-```bash
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT}의 AR ar-sbxtest01-platform | 계정 $AR_ACCOUNT
-( set -o pipefail; gcloud auth print-access-token --account="$AR_ACCOUNT" | docker login "$AR_HOST" --username oauth2accesstoken --password-stdin )
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT}의 AR ar-sbxtest01-platform | 계정 $AR_ACCOUNT의 AR 인증
-docker pull --platform="$TARGET_PLATFORM" "$BASE_IMAGE"
-```
-
-<a name="8-2-python-패키지-설치-경로를-선택"></a>
-
-#### 4-3-2. Python 패키지 설치 경로를 선택
-
-- `index`는 Docker 빌드 안에서 필요한 Python 패키지와 의존성을 모두 받을 수 있을 때 사용합니다.
-- 일부만 받을 수 있으면 [표준 이미지 wheel 반입 절차](../03.sandbox_deploy/03.3.gke/notebook-image/README.md#표준-이미지-wheel-반입)를 따라 완전한 wheel 모음을 `03.sandbox_deploy/03.3.gke/notebook-image/wheelhouse/`에 준비하고 아래 설정을 적용합니다. Dockerfile은 이 모드에서 Python 인덱스에 접속하지 않습니다. APT 설치에는 승인된 APT 접근 경로가 계속 필요합니다.
-
-```bash
-NOTEBOOK_PIP_MODE=wheelhouse
-```
-
-<a name="8-3-vm에서-빌드하고-확인-후-ar에-게시"></a>
-
-#### 4-3-3. VM에서 빌드하고 확인 후 AR에 게시
-
-```bash
-# 실행 위치 infra-son01 | 대상 VM 로컬 Docker | 계정 VM 로그인 사용자
-DOCKER_BUILDKIT=1 docker build --platform="$TARGET_PLATFORM" --build-arg "BASE_IMAGE=$BASE_IMAGE" \
-  --build-arg "IMAGE_VERSION=$IMAGE_TAG" --build-arg "NOTEBOOK_PIP_MODE=$NOTEBOOK_PIP_MODE" --tag \
-  "$IMAGE" 03.sandbox_deploy/03.3.gke/notebook-image
-docker run --rm --platform="$TARGET_PLATFORM" --entrypoint python "$IMAGE" -c \
-  'import pandas, pyarrow, db_dtypes; from google.cloud import bigquery, storage'
-docker run --rm --platform="$TARGET_PLATFORM" --entrypoint sh "$IMAGE" -c \
-  'command -v jupyterhub-singleuser && gcloud version'
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT}의 AR ar-sbxtest01-platform | 계정 $AR_ACCOUNT의 AR 인증
-docker push "$IMAGE"
-docker pull --platform="$TARGET_PLATFORM" "$IMAGE"
-# 실행 위치 infra-son01 | 대상 VM 로컬 Docker | 계정 VM 로그인 사용자
-docker image inspect "$IMAGE" --format='{{range .RepoDigests}}{{println .}}{{end}}' | grep -F \
-  "${IMAGE%:*}@sha256:"
-```
-
-각 명령이 성공한 뒤 다음 명령을 실행합니다. 그룹 공유 PoC는 마지막 명령의 `이미지@sha256:…` 값을 승인 과제 JSON의 `image`에 넣고 배포합니다. 개발 중 추가 패키지는 [개발자 인터넷 PC → GCS → Notebook Pod 절차](../03.sandbox_deploy/03.3.gke/notebook-image/README.md#개발자-추가-패키지-gcs-경유)를 사용합니다.
-
-<a name="9-jupyterhub-수동-설치-및-접속-확인"></a>
-
-<a name="-9-jupyterhub-수동-설치-및-접속-확인"></a>
-
-### 4-4. JupyterHub 수동 설치와 기동 확인
-
-`sbx03-smoke`에서 Hub와 Proxy 기동을 확인합니다. 실제 과제의 접속 검증은 과제용 Namespace, ALB 연결, 인증 설정을 갖춘 뒤 진행합니다.
-
-```mermaid
-flowchart TD
-    A["4-4-1~2 · 관리 VM에서 GKE DNS 접속 확인"]
-    A --> B["4-4-3 · 내부 AR의 차트와 이미지 확인"]
-    B --> C["4-4-4 · Helm으로 sbx03-smoke 기동"]
-    C --> D{"Hub·Proxy Pod가 준비됐는가?"}
-    D -->|아니요| E["Pod 이벤트·로그 확인"]
-    E --> D
-    D -->|예| F["4-5 · 실제 과제의 ALB와 HTTPS 확인"]
-    F --> G["배포 경로별 로그인·Notebook·PVC 검증"]
-```
-
-**수행 위치** · `infra-son01`의 Test02 저장소 루트  
-**수행 계정** · `son@sonmap.net`으로 GKE와 Artifact Registry에 접속
-
-이 절은 관리 VM에서 직접 Helm으로 설치하는 경로입니다. Private Pool과 2차 Sandbox의 플랫폼 릴리스 게시는 보류한 상태에서 진행할 수 있습니다.
-
-<a name="gke와-내부-https-접속-확인"></a>
-
-<a name="9-0-gke와-내부-https-접속-준비"></a>
-
-<a name="9-1-gke와-내부-https-접속-준비"></a>
-
-#### 4-4-1. GKE와 내부 HTTPS 접속 준비
-
-관리 VM에서 DNS 엔드포인트로 Namespace 목록을 확인합니다. DNS 접속이 아직 비활성화된 클러스터에서만 첫 명령을 실행합니다.
-
-```bash
-# 실행 위치 infra-son01 | 대상 gcp-sbx-edp-gke01 | 계정 son@sonmap.net
-gcloud container clusters update gke-sbx-main-an3 --project=gcp-sbx-edp-gke01 --region=asia-northeast3 \
-  --enable-dns-access --account=son@sonmap.net
-
-KUBECONFIG="$HOME/.kube/config-sbx-dns" gcloud container clusters get-credentials gke-sbx-main-an3 \
-  --project=gcp-sbx-edp-gke01 --region=asia-northeast3 --dns-endpoint --account=son@sonmap.net
-
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT}의 gke-sbx-main-an3 | 계정 son@sonmap.net
-CLOUDSDK_CORE_ACCOUNT=son@sonmap.net kubectl --kubeconfig="$HOME/.kube/config-sbx-dns" get namespaces
-```
-
-<a name="dns-엔드포인트로-kubectl과-helm-실행"></a>
-
-<a name="9-1-1-dns-엔드포인트로-kubectl과-helm-실행"></a>
-
-##### 4-4-1-1. DNS 엔드포인트로 kubectl과 Helm 실행
-
-`kubectl get pods -A` 실행 시 `https://10.253.3.2/api`에서 `EOF`가 발생하면 현재 터미널이 사설 IP를 가리키는 kubeconfig를 읽고 있는지 확인합니다. 위에서 만든 DNS용 kubeconfig를 같은 터미널에 지정합니다.
-
-```bash
-# 수행 위치: infra-son01 | 수행 계정: son@sonmap.net | 대상: gke-sbx-main-an3
-export KUBECONFIG="$HOME/.kube/config-sbx-dns"
-export CLOUDSDK_CORE_ACCOUNT="son@sonmap.net"
-
-kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}{"\n"}'
-kubectl get namespaces
-kubectl get pods -A
-```
-
-서버 주소가 `https://…gke.goog`로 표시되고 목록 조회가 성공하면 같은 터미널에서 `kubectl`과 `helm`을 실행합니다. 새 터미널에서는 두 `export` 명령을 다시 실행합니다.
-
-기존 Workflows 경로에서 Private Pool 사용이 확정되면 [Private Pool 접속 점검](reference/cloudbuild-private-gke-vpn-design.md)도 실행합니다. DNS·인증서 담당자와 [내부 HTTPS 연결](reference/sbx03-https-certificate-runbook.md)을 확인한 뒤 [2차 Sandbox 구축](../03.sandbox_deploy/README.md)로 진행합니다.
-
-<a name="8-1-gke-dns-접속-확인"></a>
-
-<a name="9-1-gke-dns-접속-확인"></a>
-
-<a name="9-2-gke-dns-접속-확인"></a>
-
-#### 4-4-2. GKE DNS 접속 확인
-
-```bash
-export KUBECONFIG="$HOME/.kube/config-sbx-dns"
-export CLOUDSDK_CORE_ACCOUNT="son@sonmap.net"
-
-kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}{"\n"}'
-kubectl get pods -A
-```
-
-서버 주소가 `gke.goog`이고 Pod 목록이 조회되면 진행합니다. kubeconfig 파일이 아직 없으면 [4-4-1절](#4-4-1-gke와-내부-https-접속-준비)에서 생성합니다.
-
-<a name="8-2-내부-ar-차트와-이미지-확인"></a>
-
-<a name="9-2-내부-ar-차트와-이미지-확인"></a>
-
-<a name="9-3-내부-ar-차트와-이미지-확인"></a>
-
-#### 4-4-3. 내부 AR 차트와 이미지 확인
-
-```bash
-export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform"
-export CHART_URI="oci://${AR_REPO}/jupyterhub"
-export CHART_VERSION="4.2.0"
-
-helm show chart "$CHART_URI" --version "$CHART_VERSION"
-
-gcloud artifacts docker images list "$AR_REPO" \
-  --include-tags --account=son@sonmap.net
-```
-
-| 대상 | 확인할 버전 또는 태그 |
-|---|---|
-| Helm 차트 | `jupyterhub` · `4.2.0` |
-| Hub 이미지 | `jupyterhub-k8s-hub:4.2.0` |
-| Proxy 이미지 | `jupyterhub-configurable-http-proxy:4.6.3` |
-| 표준 Notebook 이미지 | `jupyterhub-k8s-singleuser-standard:4.2.0-r2-home` 또는 승인된 이미지 |
-
-차트가 없거나 Helm 인증이 만료됐으면 [4-1절 Helm 차트 수동 반입](#4-1-infra-son01에서-helm-차트-수동-반입)을 확인합니다. 표준 Notebook 이미지가 없으면 [4-3절](#4-3-notebook-표준-이미지-빌드)에서 빌드합니다.
-
-<a name="8-3-수동-기동-확인용-values-파일-생성-및-helm-설치"></a>
-
-<a name="9-3-수동-기동-확인용-values-파일-생성-및-helm-설치"></a>
-
-<a name="9-4-수동-기동-확인용-values-파일-생성-및-helm-설치"></a>
-
-#### 4-4-4. 수동 기동 확인용 values 파일 생성 및 Helm 설치
-
-`infra-son01`의 Test02 저장소 루트에서 아래 명령으로 `$HOME/.config/jupyterhub/sbx03-smoke-values.yaml`을 생성합니다. 기존 과제 릴리스와 구분하기 위해 `sbx03-smoke` Namespace와 릴리스를 사용합니다. 이 파일은 Hub와 Proxy 기동 확인용입니다. 실제 로그인과 사용자 Notebook 시험은 과제용 인증·저장소 설정을 준비한 뒤 진행합니다.
-
-```bash
-# 수행 위치: infra-son01 | 수행 계정: VM 로그인 사용자
-export NAMESPACE="sbx03-smoke"
-export RELEASE="sbx03-smoke"
-export VALUES_FILE="$HOME/.config/jupyterhub/sbx03-smoke-values.yaml"
-mkdir -p "$HOME/.config/jupyterhub"
-
-cat > "$VALUES_FILE" <<'YAML'
-hub:
-  image:
-    name: asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/jupyterhub-k8s-hub
-    tag: "4.2.0"
-proxy:
-  service:
-    type: ClusterIP
-  chp:
-    image:
-      name: asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/jupyterhub-configurable-http-proxy
-      tag: "4.6.3"
-singleuser:
-  image:
-    name: asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/jupyterhub-k8s-singleuser-standard
-    tag: "4.2.0-r2-home"
-prePuller:
-  hook:
-    enabled: false
-  continuous:
-    enabled: false
-scheduling:
-  userScheduler:
-    enabled: false
-  userPlaceholder:
-    enabled: false
+# 실행 위치 infra-son01 | 대상 ${MAIN_CLUSTER} | kubeconfig 는 3-18 이후 받은 것
+kubectl apply -f - <<'YAML'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: sbx-static-pd
+provisioner: pd.csi.storage.gke.io
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
 YAML
-
-ls -l "$VALUES_FILE"
-helm list -n "$NAMESPACE"
+kubectl get storageclass sbx-static-pd standard-rwo
 ```
 
-파일과 대상 릴리스를 확인한 뒤 아래 명령을 실행합니다. 같은 이름의 릴리스가 있으면 설정을 갱신합니다.
+### 4-3. 공용 TCP 헬스 체크
+
+과제마다 Hub 포트가 다를 수 있어 `--use-serving-port` 로 하나를 같이 씁니다.
 
 ```bash
-helm upgrade --install "$RELEASE" "$CHART_URI" \
-  --version "$CHART_VERSION" --namespace "$NAMESPACE" --create-namespace \
-  --values "$VALUES_FILE" --wait --timeout 15m
-
-kubectl -n "$NAMESPACE" get pods,svc
+# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}
+gcloud compute health-checks create tcp hc-sbxtest01-jupyter-tcp \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" --use-serving-port \
+  --check-interval=10s --timeout=5s \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
 ```
 
-<a name="8-4-과제용-내부-https-및-로그인-확인"></a>
+### 4-4. 방화벽 포트 확인
 
-<a name="9-4-과제용-내부-https-및-로그인-확인"></a>
-
-<a name="9-5-과제용-내부-https-및-로그인-확인"></a>
-
-### 4-5. 과제용 내부 HTTPS 및 로그인 검증
-
-4-4절의 `sbx03-smoke`는 Hub와 Proxy 기동을 확인하는 릴리스입니다. 아래 절차는 과제용 values와 인증 설정이 적용된 실제 배포에 사용합니다. 내부 ALB TLS 인증서는 [3-32절](#3-32-regional-ssl-인증서-확인-및-등록)에서 관리하고, 이 절에서 브라우저 접속과 사용자 로그인을 확인합니다.
-
-<a name="4-oauth-값-등록"></a>
-
-<a name="-4-oauth-값-등록"></a>
-
-#### 4-5-1. Google OAuth 값 등록 · 기존 과제별 로그인 사용 시
-
-Google OAuth는 사용자가 Google 계정으로 로그인하도록 하는 설정입니다. 내부 ALB의 TLS 인증서는 브라우저와 ALB 사이의 HTTPS 연결에 사용됩니다. Google 로그인 경로를 사용할 때만 OAuth 클라이언트와 두 개의 Secret Manager 값이 필요합니다. 공유 그룹 PoC는 승인된 이메일과 테스트 비밀번호로 Hub에 로그인합니다.
-
-```mermaid
-sequenceDiagram
-    participant B as 브라우저
-    participant A as 내부 ALB
-    participant H as JupyterHub
-    participant G as Google OAuth
-    B->>A: HTTPS로 과제 URL 접속
-    A->>H: 요청 전달
-    H-->>B: Google 로그인 화면으로 이동
-    B->>G: Google 계정으로 인증
-    G-->>B: 등록된 콜백 URL로 리디렉션
-    B->>A: HTTPS로 콜백 요청
-    A->>H: 콜백 전달
-    H->>G: 클라이언트 자격 증명으로 인증 코드 교환
-    H-->>B: Hub 로그인 완료
-```
-
-OAuth 클라이언트에 실제 과제의 HTTPS 콜백 URL을 먼저 등록합니다. 3-13~3-16절에서 Secret과 접근 권한을 준비한 뒤, 처음 연결하거나 클라이언트 값을 변경할 때 아래 명령을 실행합니다. [Google OAuth 콜백 등록](reference/sbx03-google-oauth-runbook.md)
-
-`infra-son01`에서 아래 두 변수에 발급받은 값을 넣고 실행합니다. 실제 값은 VM 터미널에서만 설정합니다. 이 블록을 실행하기 전에 `set +x`와 `set +o history`로 출력 추적과 Bash 명령 기록을 끕니다.
+2-3-7 의 두 규칙(`fw-sbxtest01-alb-hc`, `fw-sbxtest01-ilb-proxy`)이 Pod 대역으로 `tcp:8080-8089` 를 허용해야 합니다. 이미 `tcp:8000` 으로 만들었다면 갱신합니다.
 
 ```bash
-# 수행 위치: infra-son01 | 로그인 계정: son@sonmap.net
-# 수행 계정(가장): tf-manager@gcp-sbx-edp-gke01.iam.gserviceaccount.com
-# 대상 프로젝트: gcp-sbx-edp-gke01
-set +x
-set +o history
+# 실행 위치 infra-son01 | 대상 ${VPC_HOST_PROJECT} | 계정 ${VPC_ADMIN_ACCOUNT}
+gcloud compute firewall-rules update fw-sbxtest01-alb-hc --project="${VPC_HOST_PROJECT}" \
+  --allow=tcp:8080-8089 --account="${VPC_ADMIN_ACCOUNT}"
+gcloud compute firewall-rules update fw-sbxtest01-ilb-proxy --project="${VPC_HOST_PROJECT}" \
+  --allow=tcp:8080-8089 --account="${VPC_ADMIN_ACCOUNT}"
 ```
+
+Pod 에서 나가는 방향은 환경에 맞게 따로 엽니다 — 로그인 서버(443), 포털 구성원 조회 API, 패키지 다운로드 경로.
+
+### 4-5. OAuth 값 등록
+
+3-13 ~ 3-16 에서 만든 `jupyter-oauth-client-id` · `jupyter-oauth-client-secret` 을 그대로 씁니다. Runner 가 이 값을 과제 Namespace 의 Secret `hub-oauth` 로 복사하고, Hub 설정은 파일로 읽습니다. **값을 저장소 · 요청 JSON · Terraform 변수에 적지 않습니다.**
 
 ```bash
-export SBX_GKE_PROJECT="gcp-sbx-edp-gke01"
-export ADMIN_ACCOUNT="son@sonmap.net"
-export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
-
-# 아래 두 값을 발급받은 OAuth 값으로 바꾼 뒤 실행합니다.
-export OAUTH_CLIENT_ID='발급받은 OAuth Client ID'
-export OAUTH_CLIENT_SECRET='발급받은 OAuth Client Secret'
-
-printf '%s' "$OAUTH_CLIENT_ID" | gcloud secrets versions add jupyter-oauth-client-id \
-  --project="$SBX_GKE_PROJECT" --account="$ADMIN_ACCOUNT" \
-  --impersonate-service-account="$TF_MANAGER" --data-file=-
-
-printf '%s' "$OAUTH_CLIENT_SECRET" | gcloud secrets versions add jupyter-oauth-client-secret \
-  --project="$SBX_GKE_PROJECT" --account="$ADMIN_ACCOUNT" \
-  --impersonate-service-account="$TF_MANAGER" --data-file=-
-
-unset OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET
+# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
+# 값은 화면에 남지 않게 입력합니다.
+read -rs OAUTH_VALUE && printf '%s' "$OAUTH_VALUE" | gcloud secrets versions add jupyter-oauth-client-secret \
+  --project="${SBX_GKE_PROJECT}" --data-file=- --account="${ADMIN_ACCOUNT}"; unset OAUTH_VALUE
 ```
 
-두 Secret에 새 버전이 생성됐는지 확인합니다. 이전에 Bash 기록을 사용하던 터미널이라면 `set -o history`로 다시 켤 수 있습니다.
+로그인 서버에 등록할 콜백 주소는 과제의 `https://<host><base_path>hub/oauth_callback` 입니다. 로그인 서버 주소는 `provisioner-env.yaml` 의 `HUB_OAUTH_BASE_URL` 에 넣습니다.
 
-#### 4-5-2. 과제 접속 및 Notebook 확인
+### 4-6. 기존 과제 프로젝트 권한
 
-1. Hub와 Proxy Pod가 준비됐는지 확인합니다.
-2. 내부 ALB URL Map의 호스트 규칙과 백엔드 `HEALTHY` 상태를 확인합니다. [내부 HTTPS와 인증서](reference/sbx03-https-certificate-runbook.md)
-3. 사내 테스트 PC에서 내부 DNS와 HTTPS 접속을 확인합니다. 공유 그룹은 Hub 로컬 계정으로, 기존 Google OAuth 경로는 등록한 Google 계정으로 로그인합니다.
-4. Notebook을 시작하고 `kubectl -n "$NAMESPACE" get pods,pvc`로 사용자 Pod와 PVC를 확인합니다.
+신규 과제는 `10-project` 단계가 자동화 계정 권한을 넣습니다. **이전 과제는 프로젝트가 이미 있으므로 아래 세 가지를 과제 프로젝트마다 한 번 부여합니다.**
+
+| 받는 주체 | 과제 프로젝트에서 필요한 권한 | 이유 |
+|---|---|---|
+| Terraform 실행 계정 (`tf-manager` 또는 `WI_IMPERSONATE_SA`) | 과제 서비스 계정에 `roles/iam.serviceAccountAdmin` | Workload Identity 바인딩 추가 |
+| GKE 노드 서비스 계정 | 과제 이미지 저장소에 `roles/artifactregistry.reader` | Pod 이미지 받기 |
+| 디스크를 만드는 계정 | `roles/compute.storageAdmin` (스냅샷 생성 · 읽기) | 스냅샷 → GKE 프로젝트 디스크 |
+
+```bash
+# 실행 위치 infra-son01 | 대상 과제 프로젝트 | 계정 과제 프로젝트 IAM 관리자
+export TASK_PROJECT="<과제 프로젝트>"
+export TASK_GSA="<과제 서비스 계정 이메일>"
+gcloud iam service-accounts add-iam-policy-binding "${TASK_GSA}" --project="${TASK_PROJECT}" \
+  --member="serviceAccount:${TF_MANAGER}" --role=roles/iam.serviceAccountAdmin
+```
 
 </details>
 
@@ -2753,9 +2380,9 @@ unset OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET
 <summary>내용 펼치기 / 접기</summary>
 
 **수행 주체** · Workspace 최고 관리자(디렉터리 역할) + 플랫폼 운영자(릴리스 반영)
-**수행 위치** · admin.google.com + `infra-son01`의 Test02 저장소 루트
+**수행 위치** · admin.google.com + `infra-son01`의 Test03 저장소 루트
 
-기존 과제별 자동 배포에서 Provisioner가 Google Workspace 그룹을 새로 만들 때 필요한 1회성 설정입니다. Workspace 최고 관리자가 [1-4-2절에서 그룹 생성 권한을 부여](#1-4-2-google-workspace-그룹스-관리자-역할-부여)한 뒤 플랫폼 운영자가 이 절에서 Customer ID를 확인합니다. 이후 [2차 배포 문서의 플랫폼 릴리스 게시](../03.sandbox_deploy/README.md#a-플랫폼-릴리스-게시)로 진행합니다. 공유 그룹의 Hub 로컬 로그인과 수동 기동 확인에는 적용하지 않습니다.
+기존 과제별 자동 배포에서 Provisioner가 Google Workspace 그룹을 새로 만들 때 필요한 1회성 설정입니다. Workspace 최고 관리자가 [1-4-2절에서 그룹 생성 권한을 부여](#1-4-2-google-workspace-그룹스-관리자-역할-부여)한 뒤 플랫폼 운영자가 이 절에서 Customer ID를 확인합니다. 이후 [2차 배포 문서의 플랫폼 릴리스 게시](../03.sandbox_deploy/README.md#1-릴리스-게시-코드가-바뀔-때만)로 진행합니다.
 
 <a name="5-2-cloud_identity_customer_id-확인-및-커밋"></a>
 
@@ -2764,7 +2391,7 @@ unset OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET
 Provisioner는 이 값으로 대상 Workspace 디렉터리를 지정합니다. 1-4-2절에서 사용한 실제 고객 ID와 일치하는지 확인합니다.
 
 ```bash
-# 수행 위치: infra-son01의 Test02 저장소 루트
+# 수행 위치: infra-son01의 Test03 저장소 루트
 git show HEAD:03.sandbox_deploy/03.1.request/provisioner-env.yaml | grep '^CLOUD_IDENTITY_CUSTOMER_ID:'
 ```
 

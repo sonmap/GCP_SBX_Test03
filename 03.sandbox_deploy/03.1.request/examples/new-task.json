@@ -1,0 +1,78 @@
+{
+  "schema_version": "2.0",
+  "request_id": "REQ-EXAMPLE-NEW-TASK",
+  "approval": {
+    "status": "APPROVED",
+    "approval_id": "test-approval",
+    "approved_at": "2026-01-01T00:00:00Z"
+  },
+  "action": "CREATE",
+  "task": {
+    "name": "sbx03",
+    "display_name": "Local test assignment",
+    "expires_on": "2026-12-31",
+    "origin": "NEW"
+  },
+  "identity": {
+    "group_email": "pgrp-gcp-dev-sbx03@sonmap.net",
+    "manage_group": true,
+    "jupyter_gsa": {
+      "email": "sa-sbx-sbx03-notebook-1-user@gcp-sbx-edp-sbx03.iam.gserviceaccount.com",
+      "create": true
+    },
+    "members": [
+      "tester01@sonmap.net",
+      "tester02@sonmap.net"
+    ]
+  },
+  "project": {
+    "manage": true,
+    "project_id": "gcp-sbx-edp-sbx03",
+    "create_project": true,
+    "project_name": "Local test sandbox",
+    "org_id": "123456789012",
+    "billing_account": "000000-000000-000000"
+  },
+  "data": {
+    "manage": true,
+    "bigquery_dataset": "sbx03_main",
+    "gcs_bucket": "gcp-sbx-edp-sbx03-data",
+    "datalake_datasets": [
+      {
+        "project_id": "pjt-c-admin",
+        "dataset_id": "dlk_sample"
+      }
+    ]
+  },
+  "gke": {
+    "project_id": "gcp-sbx-edp-gke01",
+    "cluster_name": "gke-sbx-main-an3",
+    "location": "asia-northeast3"
+  },
+  "workload": {
+    "area": "general",
+    "namespace": "sbx-general-sbx03",
+    "running": true,
+    "cpu": 8,
+    "memory_gib": 64,
+    "storage": {
+      "size_gb": 100,
+      "zone": "asia-northeast3-a"
+    },
+    "containers": [
+      {
+        "name": "jupyter",
+        "image": "asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/sbx03-jupyter@sha256:abababababababababababababababababababababababababababababababab",
+        "hub_port": 8081,
+        "host": "sbx.sonmap.net",
+        "base_path": "/general/sbx03/"
+      }
+    ]
+  },
+  "source": {
+    "release_id": "git-000000000000",
+    "archive_uri": "gs://gcp-sbx-edp-gke01-sbxtest01-bundles/platform-releases/git-000000000000/sandbox-source.zip",
+    "generation": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

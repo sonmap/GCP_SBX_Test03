@@ -8,8 +8,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 class BuildPathTests(unittest.TestCase):
     def test_bootstrap_and_release_docker_contexts_exist(self):
-        for name in ['03.sandbox_deploy/03.3.gke/cloudbuild/bootstrap-build.yaml','03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml',
-                     '03.sandbox_deploy/03.3.gke/cloudbuild/shared-group-runner.yaml']:
+        for name in ['03.sandbox_deploy/03.3.gke/cloudbuild/bootstrap-build.yaml','03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml']:
             config=yaml.safe_load((ROOT/name).read_text())
             for step in config['steps']:
                 args=step.get('args',[])
@@ -27,7 +26,7 @@ class BuildPathTests(unittest.TestCase):
     def test_removed_data_access_component_has_no_build_or_doc_links(self):
         self.assertFalse((ROOT/'datalake-access-provisioner').exists())
         for path in ROOT.rglob('*'):
-            if not path.is_file() or any(p in path.parts for p in ['.git','__pycache__','04.tests']):continue
+            if not path.is_file() or path.suffix=='.png' or any(p in path.parts for p in ['.git','__pycache__','04.tests']):continue
             self.assertNotIn('datalake-access-provisioner',path.read_text(),str(path))
 
 

@@ -1,16 +1,38 @@
-# GCP Sandbox Test02
+# GCP Sandbox Test03
 
-| 단계 | 시작 문서 | 수행 내용 |
-|---|---|---|
-| 1차 · 공통 인프라 | [infra-setup-commend.md](02.infra-setup/infra-setup-commend.md) | 관리 VM에서 Shared VPC·GKE·내부 ALB·Artifact Registry와 Notebook 이미지를 준비합니다. |
-| 2차 · Sandbox 구축 | [03.sandbox_deploy](03.sandbox_deploy/README.md) | 포털 승인 후 Workflows가 그룹 Hub·Proxy와 과제별 Notebook 배포를 시작합니다. |
+실작업 전 개인 검증 공간입니다. [Test02](https://github.com/sonmap/https-github.com-sonmap-GCP_SBX_Test02)를 그대로 복사한 뒤(`main` 첫 커밋) **과제당 Pod 1개** 구조로 정리했습니다.
+
+| 순서 | 폴더 | 내용 | 방식 |
+|---|---|---|---|
+| 1 | [02.infra-setup](02.infra-setup/infra-setup-commend.md) | VPC · GKE · 내부 ALB · AR · 버킷 · 계정 | **수작업** (명령서) |
+| 2 | [03.sandbox_deploy](03.sandbox_deploy/README.md) | 과제 생성 · 변경 · 중지 · 증설 | **Terraform 자동화** |
+| 3 | [05.migration](05.migration/README.md) | 기존 VM 과제를 Pod 로 이전 | 스크립트 + 같은 Terraform |
+| - | [04.tests](04.tests/README.md) | 로컬 검증 | `unittest` |
+
+## 구조
 
 ```mermaid
-flowchart TD
-    A["1차 · 공통 인프라 준비"] --> P["포털 · 그룹과 과제 승인"]
-    P --> W["2차 · Workflows와 Private Pool"]
-    W --> H["그룹 · Hub와 Proxy · 내부 ALB 연결"]
-    W --> N["과제 · Notebook Pod와 PVC"]
+flowchart LR
+    P["포털<br/>과제 요청 JSON"] --> W["Workflows → Cloud Run<br/>검증"]
+    W --> A["Infrastructure Manager<br/>그룹 · 프로젝트 · IAM · BQ · GCS"]
+    W --> B["Runner · Terraform<br/>50-workload"]
+    B --> K["GKE Autopilot<br/>Namespace · Pod · PVC · Service"]
+    B --> L["내부 ALB<br/>백엔드 · URL Map 규칙"]
 ```
 
-[참고 문서](02.infra-setup/reference/) · [저장소 테스트](04.tests/README.md)
+- **과제 1개 = Namespace 1 · Pod 1 · 디스크 1 · 서비스 계정 1.** Pod 안에서 기존 과제 이미지(JupyterHub 포함)를 그대로 실행합니다.
+- **요청 JSON 은 과제의 전체 상태입니다.** 신규 · 중지 · 기동 · 증설 · 이미지 교체 · 이전이 모두 같은 형식, 같은 경로입니다.
+- **코드는 한 벌, State 는 과제별**입니다. 과제가 늘어도 Terraform 코드는 늘지 않습니다.
+
+## Test02 에서 달라진 점
+
+| 구분 | Test02 | Test03 |
+|---|---|---|
+| 워크로드 | z2jh Helm · 그룹 공유 Hub | 기존 과제 이미지를 그대로 실행하는 Pod |
+| K8s 자원 관리 | Python 스크립트 (State 없음) | Terraform `50-workload` (과제별 State) |
+| 요청 | `CREATE` 1회 | 전체 상태 `CREATE` / `UPDATE` |
+| 기존 과제 | 대상 아님 | `origin: MIGRATED` — 기존 디스크 · 기존 서비스 계정 사용 |
+| 과제별 서브넷 | `20-network` | 삭제 |
+| 환경 값 | 스키마 · 코드에 고정 | `provisioner-env.yaml` |
+
+**실환경에서 아직 검증하지 않았습니다.** 검증이 필요한 항목은 [03.sandbox_deploy/README.md](03.sandbox_deploy/README.md#미검증-항목)에 있습니다.

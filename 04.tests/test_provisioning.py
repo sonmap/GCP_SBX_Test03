@@ -4,219 +4,157 @@ import io
 import json
 import os
 import shutil
-import subprocess
-import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
 
-from request_fixtures import make_request
+from request_fixtures import ENV, make_request
 
-ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location('provisioner',ROOT/'03.sandbox_deploy/03.1.request/main.py')
-p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
-ENV={'SBX_GKE_PROJECT':'gcp-sbx-edp-gke01','GCP_REGION':'asia-northeast3',
-     'BUNDLE_BUCKET':'gcp-sbx-edp-gke01-sbxtest01-bundles',
-     'REQUEST_BUCKET':'gcp-sbx-edp-gke01-sbxtest01-requests',
-     'WORKER_POOL':'projects/gcp-sbx-edp-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01',
-     'CLOUD_IDENTITY_CUSTOMER_ID':'C123test',
-     'JUPYTER_CHART_URI':'oci://example/jupyterhub','JUPYTER_CHART_VERSION':'4.2.0'}
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('provisioner', ROOT / '03.sandbox_deploy/03.1.request/main.py')
+p = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p)
+TF = ROOT / '03.sandbox_deploy/03.2.terraform/deployments'
 
 
-def payload():
-    data=make_request()
-    data['network'].update(required=True,shared_vpc_join=False,subnet_name='subnet-sbx01-an3',subnet_cidr='172.31.110.0/24')
-    return data
+def schema_errors(payload):
+    return [e.message for e in p.VALIDATOR.iter_errors(payload)]
 
 
-class ProvisioningTests(unittest.TestCase):
-    @mock.patch.dict(os.environ,ENV)
-    def test_bundles_use_shared_gsa_and_import_only_dataset_bucket(self):
-        written={}
-        bucket=mock.Mock();bucket.name=ENV['BUNDLE_BUCKET'];bucket.blob.side_effect=lambda name:name
-        def download(source,destination):
-            shutil.copytree(ROOT/'03.sandbox_deploy/03.2.terraform',destination/'08.sandbox_setup_02_terraform')
+@mock.patch.dict(os.environ, ENV)
+class RequestRuleTests(unittest.TestCase):
+    def test_new_and_migrated_samples_are_valid(self):
+        for request in (make_request(), make_request(migrated=True), make_request(migrated=True, containers=3)):
+            self.assertEqual(schema_errors(request), [])
+            p.validate_semantics(request)
+
+    def test_stages_follow_what_the_request_manages(self):
+        self.assertEqual(p.enabled_stages(make_request()), ['05-group', '10-project', '30-project-iam', '40-data'])
+        # A migrated task already has its group, project and data.
+        self.assertEqual(p.enabled_stages(make_request(migrated=True)), [])
+
+    def test_image_must_be_digest_pinned(self):
+        request = make_request(migrated=True)
+        request['workload']['containers'][0]['image'] = request['workload']['containers'][0]['image'].split('@')[0] + ':latest'
+        self.assertTrue(schema_errors(request))
+
+    def test_environment_policy(self):
+        cases = {
+            'workload.area': lambda r: r['workload'].update(area='mvno', namespace='sbx-mvno-rsch'),
+            'workload.namespace': lambda r: r['workload'].update(namespace='other'),
+            'image registry': lambda r: r['workload']['containers'][0].update(image='docker.io/x/y@' + 'sha256:' + 'ab' * 32),
+            'approved Jupyter domain': lambda r: r['workload']['containers'][0].update(host='sbx.example.com'),
+            'memory_gib per cpu': lambda r: r['workload'].update(cpu=4, memory_gib=64),
+            'zone of gke.location': lambda r: r['workload']['storage'].update(zone='us-central1-a'),
+            'existing_disk': lambda r: r['workload']['storage'].pop('existing_disk'),
+            'task project': lambda r: r['identity']['jupyter_gsa'].update(email='sa-other-user@gcp-sbx-edp-other.iam.gserviceaccount.com'),
+            'group_email must be': lambda r: r['identity'].update(group_email='pgrp-gcp-dev-other@sonmap.net'),
+        }
+        for message, mutate in cases.items():
+            request = make_request(migrated=True)
+            mutate(request)
+            with self.assertRaisesRegex(ValueError, message):
+                p.validate_semantics(request)
+
+    def test_containers_in_one_pod_need_distinct_ports_and_routes(self):
+        request = make_request(migrated=True, containers=2)
+        request['workload']['containers'][1]['hub_port'] = 8081
+        with self.assertRaisesRegex(ValueError, 'hub_port must be unique'):
+            p.validate_semantics(request)
+        request = make_request(migrated=True, containers=2)
+        request['workload']['containers'][1]['base_path'] = request['workload']['containers'][0]['base_path']
+        with self.assertRaisesRegex(ValueError, 'host \\+ base_path'):
+            p.validate_semantics(request)
+
+    def test_update_is_checked_against_applied_state(self):
+        applied = make_request(migrated=True)
+        with self.assertRaisesRegex(ValueError, 'action=CREATE first'):
+            p.validate_against_applied(dict(applied, action='UPDATE'), None)
+
+        # stop, resize up and image swap are ordinary updates
+        update = copy.deepcopy(applied)
+        update['action'] = 'UPDATE'
+        update['workload'].update(running=False, cpu=16, memory_gib=128)
+        update['workload']['storage']['size_gb'] = 200
+        p.validate_against_applied(update, applied)
+
+        for path, value in [(('workload', 'namespace'), 'sbx-general-other'),
+                            (('workload', 'storage', 'existing_disk'), 'disk-other'),
+                            (('workload', 'storage', 'zone'), 'asia-northeast3-b'),
+                            (('project', 'project_id'), 'gcp-sbx-edp-other')]:
+            changed = copy.deepcopy(update)
+            target = changed
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.assertRaisesRegex(ValueError, 'cannot change'):
+                p.validate_against_applied(changed, applied)
+
+        shrink = copy.deepcopy(update)
+        shrink['workload']['storage']['size_gb'] = 50
+        with self.assertRaisesRegex(ValueError, 'cannot shrink'):
+            p.validate_against_applied(shrink, applied)
+
+
+@mock.patch.dict(os.environ, ENV)
+class BundleAndBuildTests(unittest.TestCase):
+    def assemble(self, request):
+        written = {}
+        bucket = mock.Mock()
+        bucket.name = ENV['BUNDLE_BUCKET']
+        bucket.blob.side_effect = lambda name: name
+
+        def download(source, destination):
+            shutil.copytree(TF, destination / 'deployments')
             return destination
-        with mock.patch.object(p.storage,'Client') as client, mock.patch.object(p,'download_source_archive',side_effect=download),mock.patch.object(p,'upload_immutable',side_effect=lambda name,data,ctype:written.setdefault(name,data)):
-            client.return_value.bucket.return_value=bucket
-            prefix,manifest=p.assemble_bundles(payload(),b'{}')
-        self.assertEqual(set(manifest['bundles']),{'05-group','10-project','20-network','30-project-iam','40-data'})
-        group_zip=next(v for k,v in written.items() if k.endswith('/group.zip'))
-        with zipfile.ZipFile(io.BytesIO(group_zip)) as archive:
-            group_vars=json.loads(archive.read('terraform.auto.tfvars.json'))
-            self.assertEqual(group_vars['customer_id'],ENV['CLOUD_IDENTITY_CUSTOMER_ID'])
-            self.assertEqual(group_vars['members'],payload()['identity']['members'])
-            self.assertIn('google_cloud_identity_group',archive.read('main.tf').decode())
-        data_zip=next(v for k,v in written.items() if k.endswith('/data.zip'))
+        with mock.patch.object(p.storage, 'Client') as client, \
+                mock.patch.object(p, 'download_source_archive', side_effect=download) as fetched, \
+                mock.patch.object(p, 'upload_immutable', side_effect=lambda name, data, ctype: written.setdefault(name, data)):
+            client.return_value.bucket.return_value = bucket
+            prefix, manifest = p.assemble_bundles(request, b'{}')
+        return written, manifest, fetched
+
+    def test_new_task_bundles_four_stages(self):
+        written, manifest, _ = self.assemble(make_request())
+        self.assertEqual(set(manifest['bundles']), {'05-group', '10-project', '30-project-iam', '40-data'})
+        data_zip = next(v for k, v in written.items() if k.endswith('/data.zip'))
         with zipfile.ZipFile(io.BytesIO(data_zip)) as archive:
-            variables=json.loads(archive.read('terraform.auto.tfvars.json'))
-            self.assertEqual(variables['jupyter_gsa_email'],'sbx-manager@gcp-sbx-edp-gke01.iam.gserviceaccount.com')
-            imports=archive.read('imports.tf').decode()
-            self.assertIn('google_bigquery_dataset.sandbox',imports)
-            self.assertIn('google_storage_bucket.sandbox',imports)
-            self.assertNotIn('google_service_account',imports)
-            self.assertFalse(variables['create_jupyter_gsa'])
+            variables = json.loads(archive.read('terraform.auto.tfvars.json'))
+            self.assertTrue(variables['create_jupyter_gsa'])
+            self.assertEqual(variables['jupyter_gsa_email'],
+                             'sa-sbx-sbx03-notebook-1-user@gcp-sbx-edp-sbx03.iam.gserviceaccount.com')
+            # The Workload Identity binding moved to 50-workload, next to the KSA.
+            self.assertNotIn('workloadIdentityUser', archive.read('main.tf').decode())
 
-    @mock.patch.dict(os.environ,ENV)
-    def test_new_project_dedicated_gsa_and_parent_validation(self):
-        data=make_request(new_project=True)
-        data['approval']['status'] = 'PENDING'
-        self.assertTrue(list(p.VALIDATOR.iter_errors(data)))
-        data['approval']={'status':'APPROVED','approval_id':'test-approval','approved_at':'2026-11-07T00:00:00Z'}
-        data['source']['sha256']='b'*64
-        p.VALIDATOR.validate(data)
-        p.validate_semantics(data)
-        variables=p.stage_variables(data)
-        self.assertEqual(variables['10-project']['org_id'],'123456789012')
-        self.assertIsNone(variables['10-project']['folder_id'])
-        self.assertTrue(variables['40-data']['create_jupyter_gsa'])
-        self.assertEqual(variables['40-data']['identity_project_id'],'gcp-sbx-edp-sbx03')
-        self.assertEqual(variables['40-data']['jupyter_gsa_email'],'gsa-jupyter-sbx03@gcp-sbx-edp-sbx03.iam.gserviceaccount.com')
-        self.assertEqual(variables['40-data']['gke_project_id'],'gcp-sbx-edp-gke01')
-        self.assertEqual(variables['40-data']['datalake_datasets'],[{'project_id':'pjt-c-admin','dataset_id':'dlk_sample'}])
-        data['project']['folder_id']='123'
-        self.assertTrue(list(p.VALIDATOR.iter_errors(data)))
-        del data['project']['folder_id'];del data['project']['org_id']
-        self.assertTrue(list(p.VALIDATOR.iter_errors(data)))
-        data['identity']['create_jupyter_gsa']=False
-        with self.assertRaisesRegex(ValueError,'new projects require'):p.validate_semantics(data)
+    def test_migrated_task_needs_no_bundle_and_no_source_download(self):
+        written, manifest, fetched = self.assemble(make_request(migrated=True))
+        self.assertEqual(manifest['bundles'], {})
+        fetched.assert_not_called()
+        self.assertTrue(any(k.endswith('/approved-request.json') for k in written))
 
-    @mock.patch.dict(os.environ,ENV)
-    def test_old_source_cannot_silently_skip_dedicated_gsa(self):
-        data=make_request(new_project=True)
-        bucket=mock.Mock();bucket.name=ENV['BUNDLE_BUCKET'];bucket.blob.side_effect=lambda name:name
-        def download(source,destination):
-            shutil.copytree(ROOT/'03.sandbox_deploy/03.2.terraform',destination/'08.sandbox_setup_02_terraform')
-            (destination/'08.sandbox_setup_02_terraform/deployments/40-data/main.tf').write_text('provider "google" {}')
-            return destination
-        with mock.patch.object(p.storage,'Client') as client, mock.patch.object(p,'download_source_archive',side_effect=download),mock.patch.object(p,'upload_immutable'):
-            client.return_value.bucket.return_value=bucket
-            with self.assertRaisesRegex(ValueError,'does not support dedicated'):p.assemble_bundles(data,b'{}')
+    def build_spec(self, request):
+        with mock.patch.object(p.cloudbuild_v1, 'CloudBuildClient'), \
+                mock.patch.object(p.cloudbuild_v1, 'Build', side_effect=lambda spec: spec), \
+                mock.patch.object(p.cloudbuild_v1, 'CreateBuildRequest', side_effect=lambda **kw: kw) as create:
+            p.start_build(request, 'gs://r/approved/x/request.json', 'gs://b/requests/x/git-test123')
+        return create.call_args.kwargs['build']
 
-    @mock.patch.dict(os.environ,ENV)
-    def test_build_execution_identities_and_group_order(self):
-        with mock.patch.object(p.cloudbuild_v1,'CloudBuildClient',autospec=True) as client:
-            p.start_build(payload(),'gs://example/request.json','gs://example/bundle')
-            self.assertEqual(client.return_value.create_build.call_args.kwargs['request'].parent, 'projects/gcp-sbx-edp-gke01/locations/asia-northeast3')
-            build=client.return_value.create_build.call_args.kwargs['request'].build
-        spec=json.loads(p.cloudbuild_v1.Build.to_json(build))
-        self.assertEqual(spec['serviceAccount'],f"projects/{ENV['SBX_GKE_PROJECT']}/serviceAccounts/tf-manager@{ENV['SBX_GKE_PROJECT']}.iam.gserviceaccount.com")
-        self.assertEqual(len(spec['steps']),2)
-        self.assertNotIn('WORKSPACE_ADMIN_SUBJECT',str(spec))
-        commands=spec['steps'][0]['args'][1]
-        self.assertLess(commands.index('/group.zip'),commands.index('sleep 60'))
-        self.assertLess(commands.index('sleep 60'),commands.index('/project.zip'))
-        self.assertIn('deployments/sbxtest01-',commands)
-        self.assertNotIn('sa-im-',commands)
-        self.assertEqual(commands.count('tf-manager@gcp-sbx-edp-gke01.iam.gserviceaccount.com'),5)
-        group_vars=p.stage_variables(payload())
-        self.assertEqual(group_vars['10-project']['project_iam_service_account'],'tf-manager@gcp-sbx-edp-gke01.iam.gserviceaccount.com')
-        child_config=spec['steps'][1]['args'][1]
-        self.assertIn('projects/gcp-sbx-edp-gke01/serviceAccounts/tf-manager@gcp-sbx-edp-gke01.iam.gserviceaccount.com',child_config)
-        self.assertIn('pool-sbxtest01',spec['options']['pool']['name'])
+    def test_build_runs_terraform_workload_then_alb_reconcile(self):
+        spec = self.build_spec(make_request())
+        infra, workload = (step['args'][-1] for step in spec['steps'])
+        self.assertEqual(infra.count('gcloud infra-manager deployments apply'), 4)
+        self.assertNotIn('network', infra)
+        for expected in ['/opt/sandbox/run_workload.py', '/opt/sandbox/reconcile_postdeploy.py',
+                         'sbxtest01-automation-runner:git-test123', 'TF_STATE_BUCKET=' + ENV['TF_STATE_BUCKET']]:
+            self.assertIn(expected, workload)
+        for removed in ['helm', 'JUPYTER_CHART', 'apply_gke_workload']:
+            self.assertNotIn(removed, workload)
 
-    @mock.patch.dict(os.environ,ENV)
-    def test_optional_network_is_not_applied(self):
-        data=make_request()
-        self.assertFalse(data['network']['required'])
-        self.assertFalse(data['network']['shared_vpc_join'])
-        p.VALIDATOR.validate(data)
-        with mock.patch.object(p.cloudbuild_v1,'CloudBuildClient',autospec=True) as client:
-            p.start_build(data,'gs://example/request.json','gs://example/bundle')
-        build=client.return_value.create_build.call_args.kwargs['request'].build
-        text=build.steps[0].args[1]
-        self.assertNotIn('/network.zip',text)
-        self.assertIn('/data.zip',text)
-
-    @mock.patch.dict(os.environ,ENV)
-    def test_placeholder_release_rejected(self):
-        data=payload();data['source']['sha256']='0'*64
-        with self.assertRaisesRegex(ValueError,'publish a new'): p.validate_semantics(data)
-
-    def test_published_archive_matches_api_source_root_after_rename(self):
-        with tempfile.TemporaryDirectory() as temp:
-            work=Path(temp)
-            (work/'bin').mkdir()
-            stub=work/'bin/gcloud'
-            stub.write_text('#!/bin/sh\nif [ "$1" = storage ] && [ "$2" = cp ]; then\n  cp "$3" "$SBX_TEST_ARCHIVE"\nelif [ "$1" = storage ] && [ "$2" = objects ] && [ "$3" = describe ]; then\n  printf \'1234567890123\\n\'\nelse\n  exit 2\nfi\n')
-            stub.chmod(0o755)
-            env=dict(os.environ,PATH=str(work/'bin')+os.pathsep+os.environ['PATH'],SBX_TEST_ARCHIVE=str(work/'source.zip'))
-            subprocess.run(['bash',str(ROOT/'03.sandbox_deploy/03.3.gke/cloudbuild/publish-sandbox-source.sh'),'test-bucket','git-test123'],
-                           cwd=ROOT,env=env,check=True,capture_output=True,text=True)
-            extracted=work/'extracted'
-            with zipfile.ZipFile(work/'source.zip') as archive:
-                paths=archive.namelist()
-                self.assertTrue(paths)
-                self.assertTrue(all(name.startswith('08.sandbox_setup_02_terraform/deployments/') for name in paths))
-                archive.extractall(extracted)
-            written={}
-            bucket=mock.Mock();bucket.name=ENV['BUNDLE_BUCKET'];bucket.blob.side_effect=lambda name:name
-            def source(source_config,destination):
-                shutil.copytree(extracted,destination)
-                return destination
-            with mock.patch.dict(os.environ,ENV),mock.patch.object(p.storage,'Client') as client, mock.patch.object(p,'download_source_archive',side_effect=source),mock.patch.object(p,'upload_immutable',side_effect=lambda name,data,ctype:written.setdefault(name,data)):
-                client.return_value.bucket.return_value=bucket
-                _,manifest=p.assemble_bundles(payload(),b'{}')
-            self.assertEqual(len(manifest['bundles']),5)
-
-    def test_runtime_schema_accepts_complete_request_and_rejects_missing_required_fields(self):
-        data = payload()
-        p.VALIDATOR.validate(data)
-        del data['source']
-        self.assertTrue(list(p.VALIDATOR.iter_errors(data)))
-
-    @mock.patch.dict(os.environ,ENV)
-    def test_group_imports_are_literal_and_validate_membership_parent(self):
-        data=payload()
-        data['identity']['group_resource_name']='groups/group123'
-        email=data['identity']['members'][0]
-        data['identity']['membership_resource_names']={email:'groups/group123/memberships/member123'}
-        p.VALIDATOR.validate(data)
-        p.validate_semantics(data)
-        with tempfile.TemporaryDirectory() as tmp:
-            work=Path(tmp)
-            p.write_static_group_imports(work,data)
-            imports=(work/'imports.tf').read_text()
-            self.assertIn('to = google_cloud_identity_group.sandbox',imports)
-            self.assertIn('id = "groups/group123"',imports)
-            self.assertIn(f'member["{email}"]',imports)
-            self.assertNotIn('var.',imports)
-        data['identity']['membership_resource_names'][email]='groups/other/memberships/member123'
-        with self.assertRaisesRegex(ValueError,'must belong'):p.validate_semantics(data)
-
-    @mock.patch.dict(os.environ,ENV)
-    def test_group_variables_and_reject_missing_customer_or_unapproved_import(self):
-        data=payload()
-        variables=p.stage_variables(data)['05-group']
-        self.assertEqual(variables['customer_id'],ENV['CLOUD_IDENTITY_CUSTOMER_ID'])
-        self.assertEqual(variables['members'],data['identity']['members'])
-        with mock.patch.dict(os.environ,{'CLOUD_IDENTITY_CUSTOMER_ID':'__SET_CUSTOMER_ID__'}):
-            with self.assertRaisesRegex(ValueError,'configure CLOUD_IDENTITY'):p.validate_semantics(data)
-        data['identity']['group_resource_name']='groups/group123'
-        data['identity']['membership_resource_names']={'other@sonmap.net':'groups/group123/memberships/m1'}
-        with self.assertRaisesRegex(ValueError,'approved identity.members'):p.validate_semantics(data)
-
-    def test_old_group_delegation_runner_removed(self):
-        self.assertFalse((ROOT/'03.sandbox_deploy/03.3.gke/group_upsert.py').exists())
-        module=(ROOT/'03.sandbox_deploy/03.2.terraform/deployments/05-group/main.tf').read_text()
-        self.assertIn('google_cloud_identity_group_membership',module)
-        self.assertIn('prevent_destroy = true',module)
-        # initial_group_config is write-only; without ignore_changes the plan
-        # reads it as a ForceNew replacement and prevent_destroy blocks the run.
-        self.assertIn('ignore_changes = [initial_group_config]',module)
-
-    @mock.patch.dict(os.environ,ENV)
-    def test_runtime_rejects_host_network_mutations(self):
-        data=payload()
-        data['network']['create_subnet']=False
-        data['network']['shared_vpc_join']=False
-        p.validate_semantics(data)
-        for field in ['create_subnet','shared_vpc_join']:
-            invalid=copy.deepcopy(data)
-            invalid['network'][field]=True
-            with self.subTest(field=field), self.assertRaisesRegex(ValueError,'managed by VPC Admin'):
-                p.validate_semantics(invalid)
+    def test_migrated_build_has_no_infra_manager_stage(self):
+        infra = self.build_spec(make_request(migrated=True))['steps'][0]['args'][-1]
+        self.assertNotIn('infra-manager', infra)
 
 
-if __name__=='__main__': unittest.main()
+if __name__ == '__main__':
+    unittest.main()

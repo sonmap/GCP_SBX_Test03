@@ -1,6 +1,0 @@
-**
-!Dockerfile
-!requirements.txt
-!start-sandbox-notebook.sh
-!wheelhouse/
-!wheelhouse/*.whl
