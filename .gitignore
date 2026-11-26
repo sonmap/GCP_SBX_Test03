@@ -1,0 +1,15 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+.env
+__pycache__/
+*.pyc
+
+
+.local/
+*.pem
+*.key
+
+/03.sandbox_deploy/03.3.gke/notebook-image/wheelhouse/
