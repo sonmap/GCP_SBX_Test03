@@ -1,8 +1,11 @@
-# 참고 문서 (Test02 시점)
+# 참고 문서
 
-이 폴더는 Test02 에서 그대로 가져온 설계 · 운영 기록입니다. **Helm(z2jh) · 그룹 공유 Hub · 과제별 서브넷(`20-network`) · `legacy-deploy.md`** 를 다루는 부분은 Test03 구조와 맞지 않습니다.
+[1차 인프라 구축](../infra-setup-commend.md)에서 연결되는 문서만 둡니다.
 
-네트워크 · IAM · Private Pool · 인증서 · 내부 ALB 뼈대에 관한 내용은 그대로 유효합니다. Test03 의 기준 문서는 다음 두 개입니다.
+| 파일 | 내용 | 쓰는 곳 |
+|---|---|---|
+| [cloudbuild-private-gke-vpn-design.md](cloudbuild-private-gke-vpn-design.md) | Private Pool 에서 GKE API 접속 점검 | 3-17절 뒤 |
+| [check-private-gke.yaml](check-private-gke.yaml) | 위 점검에 쓰는 Cloud Build 설정 | 〃 |
+| [cloud-identity-group-terraform.md](cloud-identity-group-terraform.md) | 그룹 생성 권한, 기존 그룹 편입(import) | 5장 |
 
-- [1차 인프라 구축](../infra-setup-commend.md)
-- [2차 과제 자동화](../../03.sandbox_deploy/README.md)
+Test02 에 있던 나머지 설계 · 운영 기록(Helm, 그룹 공유 Hub, 과제별 서브넷, sbx03 런북 등)은 구조가 달라져 삭제했습니다. 필요하면 Test02 저장소에서 볼 수 있습니다.

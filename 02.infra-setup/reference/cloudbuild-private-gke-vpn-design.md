@@ -1,6 +1,6 @@
 # Private Pool에서 GKE API 접속 점검
 
-[실제 수행 절차](runbook-two-stage.md)의 5단계에서 [check-private-gke.yaml](check-private-gke.yaml)을 사용합니다. Cloud Build에 넘기는 실행 설정으로, 접속 점검이 필요할 때 실행하도록 이 참고 문서와 같은 폴더에 둡니다. 운영자는 이 문서의 접속 점검 명령에서 이 YAML을 지정합니다.
+[1차 인프라 구축 3-17절](../infra-setup-commend.md) 뒤에 [check-private-gke.yaml](check-private-gke.yaml)로 점검합니다. Cloud Build에 넘기는 실행 설정으로, 접속 점검이 필요할 때 실행하도록 이 참고 문서와 같은 폴더에 둡니다. 운영자는 이 문서의 접속 점검 명령에서 이 YAML을 지정합니다.
 
 ## 1. 무엇을 확인하는가
 
@@ -56,4 +56,4 @@ flowchart TD
   GV -->|"Control Plane 연결"| CP["Private GKE API"]
 ```
 
-현재 03-foundation의 Pool은 기존 Shared VPC를 대상으로 생성합니다. 다른 Pool VPC 설계를 적용할 때는 Pool peered-network/PSA 대상도 함께 맞춰야 합니다. 기존 Pool의 연결 대상을 문서 읽기만으로 자동 전환하지 않습니다. 전용 VPC/VPN/BGP 생성 명령은 이 저장소의 기본 구축 범위에 포함되어 있지 않습니다.
+현재 Pool은 기존 Shared VPC를 대상으로 생성합니다. 다른 Pool VPC 설계를 적용할 때는 Pool peered-network/PSA 대상도 함께 맞춰야 합니다. 기존 Pool의 연결 대상을 문서 읽기만으로 자동 전환하지 않습니다. 전용 VPC/VPN/BGP 생성 명령은 이 저장소의 기본 구축 범위에 포함되어 있지 않습니다.
