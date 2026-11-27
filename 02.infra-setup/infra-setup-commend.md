@@ -2093,18 +2093,28 @@ gcloud artifacts repositories describe "${AR_REPOSITORY}" --project="${AR_PROJEC
   --location="${REGION}" --account="${AR_ADMIN_ACCOUNT}"
 ```
 
-실행 전 해당 계정이 필요한 권한을 보유하고 있는지 확인합니다.
+실행 전 해당 계정이 필요한 권한을 보유하고 있는지 확인합니다. `gcloud` 에는 권한 시험 명령이 없어 Resource Manager API 를 직접 호출합니다.
 
 ```bash
-# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 | 실행 계정: admin@sonmap.net (edge 프로젝트 관리자)
+# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 (조회) | 실행 계정: admin@sonmap.net (edge 프로젝트 관리자)
 export AR_ADMIN_ACCOUNT="admin@sonmap.net"
 export AR_PROJECT="gcp-prod-edp-edge-509423"
-gcloud projects test-iam-permissions "${AR_PROJECT}" \
-  --permissions=artifactregistry.repositories.get,artifactregistry.repositories.setIamPolicy \
-  --account="${AR_ADMIN_ACCOUNT}"
+curl -sS -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token --account="${AR_ADMIN_ACCOUNT}")" \
+  -H "Content-Type: application/json" \
+  -d '{"permissions":["artifactregistry.repositories.get","artifactregistry.repositories.create","artifactregistry.repositories.setIamPolicy"]}' \
+  "https://cloudresourcemanager.googleapis.com/v1/projects/${AR_PROJECT}:testIamPermissions"
 ```
 
-반환 목록에 `setIamPolicy` 가 없으면 3-11 · 3-12 의 권한 부여를 수행할 수 없으므로 edge 프로젝트 관리자에게 해당 작업을 요청합니다.
+응답의 `permissions` 에 있는 것이 이 계정이 **가진** 권한입니다.
+
+| 응답에 있는 권한 | 할 수 있는 절 |
+|---|---|
+| `artifactregistry.repositories.get` | 3-10 조회 |
+| `artifactregistry.repositories.create` | 3-10 저장소 생성 |
+| `artifactregistry.repositories.setIamPolicy` | 3-11 · 3-12 권한 부여 |
+
+`setIamPolicy` 가 없으면 3-11 · 3-12 를 수행할 수 없으므로 edge 프로젝트 관리자에게 해당 작업을 요청합니다. 응답이 `{}` 이면 세 가지 모두 없는 것입니다.
 
 **`describe` 가 `NOT_FOUND` 이면** 그 이름의 저장소가 edge 프로젝트에 없는 것입니다. 둘 중 하나로 진행합니다.
 
