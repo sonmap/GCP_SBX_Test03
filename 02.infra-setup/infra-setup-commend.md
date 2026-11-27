@@ -2106,7 +2106,28 @@ gcloud projects test-iam-permissions "${AR_PROJECT}" \
 
 반환 목록에 `setIamPolicy` 가 없으면 3-11 · 3-12 의 권한 부여를 수행할 수 없으므로 edge 프로젝트 관리자에게 해당 작업을 요청합니다.
 
-저장소가 없고 새로 만들어야 한다면 edge 프로젝트 관리자에게 Docker 형식 저장소 생성을 요청합니다.
+**`describe` 가 `NOT_FOUND` 이면** 그 이름의 저장소가 edge 프로젝트에 없는 것입니다. 둘 중 하나로 진행합니다.
+
+| 경우 | 조치 |
+|---|---|
+| 위 `list` 결과에 쓸 저장소가 있음 | 그 이름을 알려 주면 저장소 전체의 `ar-sbxtest01-platform` 을 그 이름으로 바꿉니다 (3-11 · 3-12 · 3-19 · `provisioner-env.yaml` · 요청 예시 모두) |
+| 쓸 저장소가 없음 | 아래 명령으로 만듭니다 |
+
+```bash
+# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 | 실행 계정: admin@sonmap.net (edge 프로젝트 관리자)
+export REGION="asia-northeast3"
+export AR_ADMIN_ACCOUNT="admin@sonmap.net"
+export AR_PROJECT="gcp-prod-edp-edge-509423"
+export AR_REPOSITORY="ar-sbxtest01-platform"
+gcloud artifacts repositories create "${AR_REPOSITORY}" --project="${AR_PROJECT}" \
+  --location="${REGION}" --repository-format=docker \
+  --description="Sandbox GKE runner, provisioner and task Jupyter images" \
+  --account="${AR_ADMIN_ACCOUNT}"
+gcloud artifacts repositories describe "${AR_REPOSITORY}" --project="${AR_PROJECT}" \
+  --location="${REGION}" --account="${AR_ADMIN_ACCOUNT}" --format='value(name,format)'
+```
+
+`PERMISSION_DENIED` 면 `admin@sonmap.net` 에 edge 프로젝트의 `roles/artifactregistry.admin` 이 없는 것이므로 edge 프로젝트 관리자에게 생성을 요청합니다.
 
 ### 3-11. 이미지 올리기 권한 — tf-manager
 
