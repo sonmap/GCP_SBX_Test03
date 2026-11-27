@@ -1,12 +1,14 @@
 import importlib.util
+import json
 import re
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from request_fixtures import make_request
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('run_workload', ROOT / '03.sandbox_deploy/03.3.gke/run_workload.py')
+spec = importlib.util.spec_from_file_location('run_terraform', ROOT / '03.sandbox_deploy/03.3.gke/run_terraform.py')
 w = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(w)
 MODULE = ROOT / '03.sandbox_deploy/03.2.terraform/deployments/50-workload'
@@ -77,6 +79,27 @@ class LoginSwitchTests(unittest.TestCase):
         self.assertIn('mount_oauth = var.hub_config_managed && var.hub_auth_mode == "oauth"', (MODULE / 'main.tf').read_text())
 
 
+class StageRunTests(unittest.TestCase):
+    def test_stages_share_one_state_layout_and_run_in_order(self):
+        calls = []
+        with mock.patch.object(w, 'run', side_effect=lambda args, **kw: calls.append(args) or '{"resource_changes": []}'):
+            for stage in ['10-project', '50-workload']:
+                w.terraform_stage(stage, Path('/tmp/x'), 'task01', {'TF_STATE_BUCKET': 'bkt'})
+        inits = [c for c in calls if c[:2] == ['terraform', 'init']]
+        self.assertIn('-backend-config=prefix=tasks/task01/10-project', inits[0])
+        self.assertIn('-backend-config=prefix=tasks/task01/50-workload', inits[1])
+        self.assertTrue(all('-backend-config=bucket=bkt' in c for c in inits))
+        self.assertEqual(w.STAGE_ORDER, ['05-group', '10-project', '30-project-iam', '40-data', '50-workload'])
+
+    def test_guard_stops_before_apply(self):
+        calls = []
+        plan = json.dumps({'resource_changes': [change('google_storage_bucket', 'delete')]})
+        with mock.patch.object(w, 'run', side_effect=lambda args, **kw: calls.append(args) or plan):
+            with self.assertRaises(SystemExit):
+                w.terraform_stage('40-data', Path('/tmp/x'), 'task01', {'TF_STATE_BUCKET': 'bkt'})
+        self.assertFalse(any(c[:2] == ['terraform', 'apply'] for c in calls))
+
+
 class DestroyGuardTests(unittest.TestCase):
     def test_ordinary_operations_pass(self):
         plan = {'resource_changes': [
@@ -84,6 +107,8 @@ class DestroyGuardTests(unittest.TestCase):
             change('kubernetes_persistent_volume_claim', 'update'),
             change('kubernetes_config_map', 'delete', 'create'),
             change('kubernetes_namespace', 'no-op'),
+            change('google_cloud_identity_group_membership', 'delete'),
+            change('google_project_iam_member', 'delete'),
         ]}
         self.assertEqual(w.destructive_changes(plan), [])
 

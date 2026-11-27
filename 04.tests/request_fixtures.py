@@ -10,7 +10,6 @@ ENV = {
     "TF_STATE_BUCKET": "gcp-sbx-gke01-sbxtest01-tfstate",
     "WORKER_POOL": "projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01",
     "RUNNER_IMAGE_REPO": REGISTRY + "/sbxtest01-automation-runner",
-    "DEPLOYMENT_PREFIX": "sbxtest01",
     "SHARED_URL_MAP_NAME": "urlmap-alb-sbxtest01-shared",
     "SHARED_HEALTH_CHECK_NAME": "hc-sbxtest01-jupyter-tcp",
     "CLOUD_IDENTITY_CUSTOMER_ID": "C123test",

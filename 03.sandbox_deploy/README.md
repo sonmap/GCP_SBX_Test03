@@ -6,15 +6,14 @@
 flowchart LR
     J["요청 JSON<br/>(포털 · 지금은 수동)"] --> G["GCS approved/"]
     G --> W["Workflow"] --> R["Cloud Run<br/>검증 · 번들"]
-    R --> A["A · Infrastructure Manager<br/>그룹 · 프로젝트 · IAM · 데이터"]
-    A --> B["B · Runner<br/>Terraform 50-workload"]
-    B --> C["C · Runner<br/>ALB 연결 · 확인 · 기록"]
+    R --> B["Cloud Build · Runner<br/>Terraform 05 → 10 → 30 → 40 → 50<br/>State gs://…-tfstate/tasks/&lt;과제&gt;/&lt;단계&gt;"]
+    B --> C["Runner<br/>ALB 연결 · 확인 · 기록"]
 ```
 
 | 폴더 | 내용 |
 |---|---|
 | [03.1.request](03.1.request/README.md) | 요청 형식, 접수 API |
-| [03.2.terraform](03.2.terraform/README.md) | 과제별 Terraform 5단계 |
+| [03.2.terraform](03.2.terraform/README.md) | 과제별 Terraform 5단계 · State 위치 |
 | [03.3.gke](03.3.gke/README.md) | Runner (Terraform 실행, ALB 연결) |
 
 **수행 위치** · 관리 VM 의 Test03 저장소 루트

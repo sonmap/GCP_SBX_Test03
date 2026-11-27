@@ -3,7 +3,7 @@ FROM gcr.io/google.com/cloudsdktool/cloud-sdk:slim
 ARG TERRAFORM_VERSION=1.9.8
 
 COPY 03.sandbox_deploy/03.3.gke/requirements.txt /tmp/requirements.txt
-COPY 03.sandbox_deploy/03.3.gke/run_workload.py 03.sandbox_deploy/03.3.gke/reconcile_postdeploy.py /opt/sandbox/
+COPY 03.sandbox_deploy/03.3.gke/run_terraform.py 03.sandbox_deploy/03.3.gke/reconcile_postdeploy.py /opt/sandbox/
 COPY 03.sandbox_deploy/03.2.terraform/deployments/50-workload /opt/sandbox/terraform/50-workload
 
 # Terraform and its providers are baked into the image: the private pool needs
@@ -15,7 +15,7 @@ RUN apt-get update \
     && unzip -q /tmp/terraform.zip terraform -d /usr/local/bin \
     && terraform -chdir=/opt/sandbox/terraform/50-workload providers mirror /opt/sandbox/terraform/providers \
     && printf 'provider_installation {\n  filesystem_mirror {\n    path = "/opt/sandbox/terraform/providers"\n  }\n}\n' > /opt/sandbox/terraform/terraformrc \
-    && chmod 0555 /opt/sandbox/run_workload.py /opt/sandbox/reconcile_postdeploy.py \
+    && chmod 0555 /opt/sandbox/run_terraform.py /opt/sandbox/reconcile_postdeploy.py \
     && rm -rf /var/lib/apt/lists/* /tmp/terraform.zip /tmp/requirements.txt
 
 ENV TF_CLI_CONFIG_FILE=/opt/sandbox/terraform/terraformrc \

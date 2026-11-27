@@ -158,20 +158,24 @@ class BundleAndBuildTests(unittest.TestCase):
             p.start_build(request, 'gs://r/approved/x/request.json', 'gs://b/requests/x/git-test123')
         return create.call_args.kwargs['build']
 
-    def test_build_runs_terraform_workload_then_alb_reconcile(self):
-        spec = self.build_spec(make_request())
-        infra, workload = (step['args'][-1] for step in spec['steps'])
-        self.assertEqual(infra.count('gcloud infra-manager deployments apply'), 4)
-        self.assertNotIn('network', infra)
-        for expected in ['/opt/sandbox/run_workload.py', '/opt/sandbox/reconcile_postdeploy.py',
-                         'sbxtest01-automation-runner:git-test123', 'TF_STATE_BUCKET=' + ENV['TF_STATE_BUCKET']]:
-            self.assertIn(expected, workload)
-        for removed in ['helm', 'JUPYTER_CHART', 'apply_gke_workload']:
-            self.assertNotIn(removed, workload)
+    def test_one_build_runs_terraform_then_alb(self):
+        for request in (make_request(), make_request(migrated=True)):
+            spec = self.build_spec(request)
+            self.assertEqual([step['id'] for step in spec['steps']], ['terraform', 'alb'])
+            terraform, alb = spec['steps']
+            self.assertEqual(terraform['args'][0], '/opt/sandbox/run_terraform.py')
+            self.assertTrue(terraform['name'].endswith('sbxtest01-automation-runner:git-test123'))
+            self.assertIn('TF_STATE_BUCKET=' + ENV['TF_STATE_BUCKET'], terraform['env'])
+            self.assertEqual(alb['args'][0], '/opt/sandbox/reconcile_postdeploy.py')
+            self.assertEqual(spec['options']['pool']['name'], ENV['WORKER_POOL'])
+            # No Infrastructure Manager anywhere: one Terraform path, one state place.
+            self.assertNotIn('infra-manager', json.dumps(spec))
 
-    def test_migrated_build_has_no_infra_manager_stage(self):
-        infra = self.build_spec(make_request(migrated=True))['steps'][0]['args'][-1]
-        self.assertNotIn('infra-manager', infra)
+    def test_every_stage_uses_the_same_gcs_backend(self):
+        for stage in ['05-group', '10-project', '30-project-iam', '40-data', '50-workload']:
+            versions = (TF / stage / 'versions.tf').read_text()
+            self.assertIn('backend "gcs" {}', versions, stage)
+            self.assertIn('prefix=tasks/<task>/', versions, stage)
 
 
 if __name__ == '__main__':

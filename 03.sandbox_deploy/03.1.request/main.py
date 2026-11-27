@@ -21,7 +21,8 @@ REQUEST_RE = re.compile(r"^REQ-[A-Z0-9-]{6,64}$")
 SCHEMA = json.loads(Path(__file__).with_name("sandbox-request.schema.json").read_text())
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
-# stage -> (archive name, Infrastructure Manager deployment suffix)
+# stage -> (archive name, short name). The runner applies each with its own
+# state at gs://<TF_STATE_BUCKET>/tasks/<task>/<stage>.
 STAGES = {
     "05-group": ("group.zip", "group"),
     "10-project": ("project.zip", "project"),
@@ -301,7 +302,7 @@ def zip_directory(source: Path) -> bytes:
 def write_static_data_imports(work: Path, payload: dict) -> None:
     """Write literal import IDs for data resources that were approved for adoption.
 
-    Infrastructure Manager uses Terraform 1.5.7, where import block IDs cannot
+    Import block IDs are written as literals so the bundle is self-contained and
     reference input variables. This generated file is included only in the
     request-specific bundle, so its values are already approved and immutable.
     """
@@ -398,43 +399,19 @@ def assemble_bundles(payload: dict, raw_request: bytes) -> tuple[str, dict]:
 
 
 def start_build(payload: dict, request_uri: str, bundle_prefix: str):
+    """One Cloud Build on the private pool, two steps, both in the runner image:
+    Terraform for every stage (one state location), then the ALB attachment."""
     project = os.environ["SBX_GKE_PROJECT"]
     region = os.environ["GCP_REGION"]
-    task = payload["task"]["name"]
-    request_id = payload["request_id"]
     release_id = payload["source"]["release_id"]
-    deployment_prefix = os.environ.get("DEPLOYMENT_PREFIX", "sbx")
-    deployment_key = hashlib.sha256(payload["project"]["project_id"].encode()).hexdigest()[:8]
     worker_pool = os.environ["WORKER_POOL"]
     tf_manager = f"{os.environ.get('TF_MANAGER_SA', 'tf-manager')}@{project}.iam.gserviceaccount.com"
     service_account = f"projects/{project}/serviceAccounts/{tf_manager}"
 
-    # Stage A (Infrastructure Manager, one state per task per stage): group,
-    # project, IAM, data. Skipped entirely when the request manages none of them.
-    commands = ["set -euo pipefail"]
-    for stage in enabled_stages(payload):
-        archive, name = STAGES[stage]
-        commands.append(
-            "gcloud infra-manager deployments apply "
-            f"\"projects/{project}/locations/{region}/deployments/{deployment_prefix}-{task}-{deployment_key}-{name}\" "
-            f"--service-account=\"{service_account}\" "
-            f"--gcs-source=\"{bundle_prefix}/{archive}\" "
-            f"--worker-pool=\"{worker_pool}\" "
-            "--provider-source=SERVICE_MAINTAINED "
-            f"--annotations=\"request_id={request_id},task={task}\" "
-            "--quiet"
-        )
-        if name == "group":
-            # Group IAM visibility may lag creation. Failures stop the build.
-            commands.append("sleep 60")
-    if len(commands) == 1:
-        commands.append("echo 'no Google Cloud stage requested; workload only'")
-
-    # Stage B (runner image, Terraform CLI + GCS state per task): Kubernetes
-    # workload, then ALB attachment. The runner image tag equals the approved
-    # release, so the 50-workload module cannot drift under an approved request.
-    automation_image = f"{os.environ['RUNNER_IMAGE_REPO']}:{release_id}"
-    common_env = [
+    # The runner image tag equals the approved release, so the Terraform code
+    # and providers cannot drift under an approved request.
+    runner_image = f"{os.environ['RUNNER_IMAGE_REPO']}:{release_id}"
+    env = [
         f"SBX_GKE_PROJECT={project}",
         f"GCP_REGION={region}",
         f"BUNDLE_BUCKET={os.environ['BUNDLE_BUCKET']}",
@@ -449,55 +426,27 @@ def start_build(payload: dict, request_uri: str, bundle_prefix: str):
         "KUBECONFIG=/workspace/kubeconfig",
         f"GKE_ENDPOINT_MODE={os.environ.get('GKE_ENDPOINT_MODE', 'internal')}",
     ]
-    child_build = {
-        "steps": [
-            {
-                "name": automation_image,
-                "entrypoint": "python3",
-                "args": ["/opt/sandbox/run_workload.py", f"{bundle_prefix}/approved-request.json"],
-                "env": common_env,
-            },
-            {
-                "name": automation_image,
-                "entrypoint": "python3",
-                "args": ["/opt/sandbox/reconcile_postdeploy.py", "/workspace/approved-request.json"],
-                "env": common_env,
-            },
-        ],
-        "options": {
-            "logging": "CLOUD_LOGGING_ONLY",
-            "pool": {"name": worker_pool},
-        },
-        "serviceAccount": service_account,
-        "timeout": "3600s",
-    }
-    child_config = json.dumps(child_build)
-    gke_command = (
-        "set -euo pipefail\n"
-        "cat > /workspace/gke-build.json <<'JSON'\n"
-        f"{child_config}\n"
-        "JSON\n"
-        f"gcloud builds submit --no-source "
-        f"--config=/workspace/gke-build.json --project={project} "
-        f"--region={region} --quiet"
-    )
-
     build_spec = {
         "steps": [
             {
-                "name": "gcr.io/google.com/cloudsdktool/cloud-sdk:slim",
-                "entrypoint": "bash",
-                "args": ["-ceu", "\n".join(commands)],
+                "id": "terraform",
+                "name": runner_image,
+                "entrypoint": "python3",
+                "args": ["/opt/sandbox/run_terraform.py", f"{bundle_prefix}/approved-request.json"],
+                "env": env,
             },
             {
-                "name": "gcr.io/google.com/cloudsdktool/cloud-sdk:slim",
-                "entrypoint": "bash",
-                "args": ["-ceu", gke_command],
+                "id": "alb",
+                "name": runner_image,
+                "entrypoint": "python3",
+                "args": ["/opt/sandbox/reconcile_postdeploy.py", "/workspace/approved-request.json"],
+                "env": env,
             },
         ],
         "options": {"logging": "CLOUD_LOGGING_ONLY", "pool": {"name": worker_pool}},
         "service_account": service_account,
-        "timeout": "14400s",
+        "timeout": "7200s",
+        "tags": [f"task-{payload['task']['name']}", payload["request_id"].lower()[:128]],
     }
     build = cloudbuild_v1.Build(build_spec)
     client = cloudbuild_v1.CloudBuildClient(

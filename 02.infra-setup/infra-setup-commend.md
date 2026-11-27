@@ -210,7 +210,7 @@ flowchart TD
     E --> E1["cloudresourcemanager · orgpolicy · cloudbilling · cloudidentity"]
 ```
 
-`config`는 Infrastructure Manager에 사용합니다. Shared VPC 호스트의 네트워크·DNS 준비는 [2절](#2-shared-vpc와-네트워크)에서 진행합니다. `certificatemanager.googleapis.com`은 [3-32절 인증서 준비](#3-32-regional-ssl-인증서-확인-및-등록)에서 별도로 활성화합니다.
+`config`(Infrastructure Manager)는 Test03 에서 쓰지 않습니다. 모든 Terraform 은 Runner 가 실행하고 State 는 `tfstate` 버킷(4-1절)에 둡니다. 이미 켜져 있어도 문제는 없습니다. Shared VPC 호스트의 네트워크·DNS 준비는 [2절](#2-shared-vpc와-네트워크)에서 진행합니다. `certificatemanager.googleapis.com`은 [3-32절 인증서 준비](#3-32-regional-ssl-인증서-확인-및-등록)에서 별도로 활성화합니다.
 
 ```bash
 # [infra-son01] 플랫폼 운영자 · 대상 ${SBX_GKE_PROJECT}
@@ -284,7 +284,7 @@ gcloud iam service-accounts create tf-manager --project="${SBX_GKE_PROJECT}" --d
 
 <a name="4-tf-manager-권한--cicd-기반-구축--build--infrastructure-manager"></a>
 
-### 1-4. tf-manager 권한 — CI/CD 기반 구축 · Build · Infrastructure Manager
+### 1-4. tf-manager 권한 — CI/CD 기반 구축 · Build
 
 #### 1-4-1. GCP 프로젝트 IAM 역할 부여
 
@@ -439,9 +439,6 @@ gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${
 gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \
   --member="serviceAccount:${TF_MANAGER}" --role=roles/iam.serviceAccountTokenCreator --condition=None \
   --account="${ADMIN_ACCOUNT}"
-gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \
-  --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@gcp-sa-config.iam.gserviceaccount.com" \
-  --role=roles/iam.serviceAccountUser --condition=None --account="${ADMIN_ACCOUNT}"
 gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \
   --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@gcp-sa-cloudbuild.iam.gserviceaccount.com" \
   --role=roles/iam.serviceAccountTokenCreator --condition=None --account="${ADMIN_ACCOUNT}"
@@ -1341,12 +1338,12 @@ flowchart TD
     R -->|승인 요청 읽기| W["Workflow가 실행하는 배포 구성요소"]
     S["플랫폼 릴리스 Cloud Build"] -->|release.json과 소스 ZIP 게시| B["bundles · 3-3~3-4"]
     V["Provisioner"] -->|요청별 배포 번들 저장| B
-    B -->|Terraform ZIP 읽기| I["Infrastructure Manager"]
+    B -->|Terraform ZIP 읽기| I["Runner (Cloud Build · tf-manager)"]
     M["관리 VM의 gcloud builds submit"] -->|빌드 소스 업로드| U["build-source · 3-5~3-6"]
     U -->|빌드 소스 읽기| C["Cloud Build"]
 ```
 
-3-7~3-8절은 `sbx-manager`에 두 버킷(`requests`, `bundles`)의 객체 관리 권한을 부여합니다. 3-9절은 Infrastructure Manager 서비스 에이전트에 `bundles`의 객체 읽기 권한을 부여합니다.
+3-7~3-8절은 `sbx-manager`에 두 버킷(`requests`, `bundles`)의 객체 관리 권한을 부여합니다. 3-9절은 Runner 실행 계정 `tf-manager` 에 `bundles` 의 객체 읽기 권한을 부여합니다. Terraform State 는 4-1절의 `tfstate` 버킷에 따로 둡니다.
 
 필요한 변수 선언을 아래 코드 블록 맨 앞에 포함했습니다. 별도 문서에서 변수를 설정할 필요 없이, 이 문서의 선언부터 같은 터미널에서 실행합니다. `# 주석`을 보며 순서대로 실행하고, **기존 자원이 있으면 해당 생성 명령을 건너뜁니다.** 403·인증·연결 오류면 중단합니다. 선택 작업은 주석을 해제한 경우에만 실행합니다.
 
@@ -1524,7 +1521,7 @@ gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01
 ```bash
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}
 gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01-bundles" \
-  --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@gcp-sa-config.iam.gserviceaccount.com" \
+  --member="serviceAccount:${TF_MANAGER}" \
   --role=roles/storage.objectViewer --account="${ADMIN_ACCOUNT}" \
   --impersonate-service-account="${TF_MANAGER}"
 
@@ -2323,6 +2320,8 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-https --project="
 | 4-6 | 기존 과제 프로젝트 권한 | 이전 과제의 Workload Identity · 이미지 · 스냅샷 |
 
 ### 4-1. Terraform State 버킷
+
+**모든 과제 · 모든 단계의 State 가 이 버킷 한 곳에 있습니다** (`tasks/<과제>/<단계>`). Infrastructure Manager 는 쓰지 않습니다.
 
 ```bash
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}

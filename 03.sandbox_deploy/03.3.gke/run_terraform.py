@@ -1,23 +1,43 @@
 #!/usr/bin/env python3
-"""Apply one task's Kubernetes workload with Terraform (stage 50-workload).
+"""Apply every Terraform stage of one task, one way, one state location.
 
-Input is the approved full-state request. The same command creates a task,
-stops or starts it, resizes it, or swaps its image: the request changes,
-Terraform works out the difference against the task's own state.
+  gs://<TF_STATE_BUCKET>/tasks/<task>/05-group
+                                    /10-project
+                                    /30-project-iam
+                                    /40-data
+                                    /50-workload
+
+Stages 05-40 come from the approved bundle the provisioner wrote (only the
+stages the request manages). 50-workload is always applied. Each stage is
+init -> plan -> destroy guard -> apply, so a request that would delete a
+protected resource stops before anything changes.
 """
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
+import zipfile
 from pathlib import Path
 
 MODULE_DIR = Path(os.environ.get("WORKLOAD_MODULE_DIR", "/opt/sandbox/terraform/50-workload"))
 WORKSPACE = Path(os.environ.get("WORKSPACE_DIR", "/workspace"))
 
-# Deleting any of these means data loss or an outage that a request should
-# never cause. A plan that tries is rejected before apply.
+STAGE_ORDER = ["05-group", "10-project", "30-project-iam", "40-data", "50-workload"]
+
+# Deleting any of these means data loss, lost access or an outage that a
+# request should never cause. Removing a member or an IAM binding is allowed.
 PROTECTED_TYPES = {
+    # 05-40
+    "google_cloud_identity_group",
+    "google_project",
+    "google_project_service",
+    "google_service_account",
+    "google_bigquery_dataset",
+    "google_storage_bucket",
+    # 50-workload
     "kubernetes_namespace",
     "kubernetes_persistent_volume",
     "kubernetes_persistent_volume_claim",
@@ -119,20 +139,72 @@ def ensure_oauth_secret(request: dict, env: dict) -> None:
         raise RuntimeError(f"kubectl apply secret failed: {result.stderr.strip()}")
 
 
+def terraform_stage(stage: str, work: Path, task: str, env: dict, *, targets_first=None, between=None) -> None:
+    """init (task/stage state) -> plan -> guard -> apply."""
+    run(["terraform", "init", "-input=false", "-no-color", "-reconfigure",
+         f"-backend-config=bucket={env['TF_STATE_BUCKET']}",
+         f"-backend-config=prefix=tasks/{task}/{stage}"], env=env, cwd=work)
+    run(["terraform", "plan", "-input=false", "-no-color", "-lock-timeout=300s", "-out=tfplan"], env=env, cwd=work)
+    plan = json.loads(run(["terraform", "show", "-json", "tfplan"], env=env, cwd=work))
+    blocked = destructive_changes(plan)
+    if blocked:
+        raise SystemExit(
+            f"[STOP] {stage}: the plan would delete protected resources; nothing was applied:\n  "
+            + "\n  ".join(blocked))
+    if targets_first:
+        # Create these first, run a step outside Terraform, then apply the rest.
+        run(["terraform", "apply", "-input=false", "-no-color", "-auto-approve", "-lock-timeout=300s"]
+            + [f"-target={t}" for t in targets_first], env=env, cwd=work)
+        between()
+        run(["terraform", "apply", "-input=false", "-no-color", "-auto-approve", "-lock-timeout=300s"],
+            env=env, cwd=work)
+    else:
+        run(["terraform", "apply", "-input=false", "-no-color", "-lock-timeout=300s", "tfplan"], env=env, cwd=work)
+    print(f"[OK] {stage} applied (state tasks/{task}/{stage})", flush=True)
+
+
+def fetch_bundle(uri: str, sha256: str, destination: Path, env: dict) -> None:
+    """Download one approved stage ZIP, check it, unpack it."""
+    archive = destination.with_suffix(".zip")
+    run(["gcloud", "storage", "cp", uri, str(archive)], env=env)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != sha256:
+        raise SystemExit(f"[STOP] bundle checksum mismatch: {uri}")
+    with zipfile.ZipFile(archive) as bundle:
+        bundle.extractall(destination)
+
+
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: run_workload.py APPROVED_REQUEST_GCS_URI")
+        raise SystemExit("usage: run_terraform.py APPROVED_REQUEST_GCS_URI")
 
     env = dict(os.environ)
     env.pop("CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT", None)
     env.setdefault("KUBECONFIG", str(WORKSPACE / "kubeconfig"))
 
+    request_uri = sys.argv[1]
+    bundle_prefix = request_uri.rsplit("/", 1)[0]
     request_file = WORKSPACE / "approved-request.json"
-    run(["gcloud", "storage", "cp", sys.argv[1], str(request_file)], env=env)
+    manifest_file = WORKSPACE / "manifest.json"
+    run(["gcloud", "storage", "cp", request_uri, str(request_file)], env=env)
+    run(["gcloud", "storage", "cp", f"{bundle_prefix}/manifest.json", str(manifest_file)], env=env)
     request = json.loads(request_file.read_text(encoding="utf-8"))
+    bundles = json.loads(manifest_file.read_text(encoding="utf-8"))["bundles"]
     task = request["task"]["name"]
-    gke = request["gke"]
 
+    # ---- stages 05-40: only those the request manages ----------------------
+    for stage in [s for s in STAGE_ORDER if s in bundles]:
+        work = WORKSPACE / stage
+        if work.exists():
+            shutil.rmtree(work)
+        fetch_bundle(bundles[stage]["uri"], bundles[stage]["sha256"], work, env)
+        terraform_stage(stage, work, task, env)
+        if stage == "05-group":
+            # Group visibility in IAM may lag creation.
+            time.sleep(60)
+
+    # ---- stage 50: Kubernetes workload --------------------------------------
+    gke = request["gke"]
     run([
         "gcloud", "container", "clusters", "get-credentials", gke["cluster_name"],
         f"--project={gke['project_id']}", f"--location={gke['location']}",
@@ -146,32 +218,17 @@ def main():
     (work / "terraform.auto.tfvars.json").write_text(
         json.dumps(workload_tfvars(request, env), indent=2, sort_keys=True), encoding="utf-8")
 
-    run(["terraform", "init", "-input=false", "-no-color",
-         f"-backend-config=bucket={env['TF_STATE_BUCKET']}",
-         f"-backend-config=prefix=tasks/{task}/50-workload"], env=env, cwd=work)
-    run(["terraform", "plan", "-input=false", "-no-color", "-lock-timeout=300s", "-out=tfplan"], env=env, cwd=work)
-    plan = json.loads(run(["terraform", "show", "-json", "tfplan"], env=env, cwd=work))
-
-    blocked = destructive_changes(plan)
-    if blocked:
-        raise SystemExit(
-            "[STOP] the plan would delete protected resources; nothing was applied:\n  "
-            + "\n  ".join(blocked))
-
     # The login-server Secret is only needed when the managed Hub config uses
     # OAuth. With HUB_AUTH_MODE=dummy (tests) Secret Manager is not touched.
     managed = request["workload"].get("hub_config", "MANAGED") == "MANAGED"
     if managed and env.get("HUB_AUTH_MODE", "oauth") == "oauth":
-        # First apply: the namespace must exist before the Secret, and the
-        # Secret before the Pod. Create the namespace alone, then everything.
-        run(["terraform", "apply", "-input=false", "-no-color", "-auto-approve", "-lock-timeout=300s",
-             "-target=kubernetes_namespace.task"], env=env, cwd=work)
-        ensure_oauth_secret(request, env)
-        run(["terraform", "apply", "-input=false", "-no-color", "-auto-approve", "-lock-timeout=300s"],
-            env=env, cwd=work)
+        # The namespace must exist before the Secret, the Secret before the Pod.
+        terraform_stage("50-workload", work, task, env,
+                        targets_first=["kubernetes_namespace.task"],
+                        between=lambda: ensure_oauth_secret(request, env))
     else:
-        run(["terraform", "apply", "-input=false", "-no-color", "-lock-timeout=300s", "tfplan"], env=env, cwd=work)
-    print(f"[OK] workload applied: task={task} running={request['workload']['running']}", flush=True)
+        terraform_stage("50-workload", work, task, env)
+    print(f"[OK] all stages applied: task={task} running={request['workload']['running']}", flush=True)
 
 
 if __name__ == "__main__":

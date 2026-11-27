@@ -1,16 +1,37 @@
 # 과제별 Terraform
 
-코드는 한 벌이고 State 는 **과제 × 단계**마다 따로 있습니다. VM 에서 직접 `terraform apply` 하지 않습니다.
+코드는 한 벌, State 는 **과제 × 단계마다 하나**이고 모두 **같은 버킷 · 같은 규칙**으로 저장됩니다. 실행도 한 곳(Private Pool 의 Runner, Terraform CLI)에서만 합니다.
 
-| 단계 | 만드는 것 | 실행 | State | 실행 조건 |
-|---|---|---|---|---|
-| `05-group` | Cloud Identity 그룹 · 구성원 | Infrastructure Manager | Deployment `<prefix>-<과제>-<hash>-group` | `identity.manage_group` |
-| `10-project` | 프로젝트 · API · 자동화 IAM | 〃 | `…-project` | `project.manage` |
-| `30-project-iam` | 그룹의 프로젝트 권한 | 〃 | `…-project-iam` | `project.manage` |
-| `40-data` | BigQuery · GCS · 서비스 계정 · 데이터 권한 | 〃 | `…-data` | `data.manage` |
-| `50-workload` | Namespace · KSA · Workload Identity · PV/PVC · Pod · Service | Runner (Terraform CLI) | `gs://<TF_STATE_BUCKET>/tasks/<과제>/50-workload` | 항상 |
+```
+gs://gcp-sbx-gke01-sbxtest01-tfstate/tasks/<과제>/05-group/default.tfstate
+                                              /10-project/default.tfstate
+                                              /30-project-iam/default.tfstate
+                                              /40-data/default.tfstate
+                                              /50-workload/default.tfstate
+```
 
-기존 VM 과제(`origin: MIGRATED`)는 그룹 · 프로젝트 · 데이터가 이미 있으므로 **`50-workload` 만** 실행합니다.
+| 단계 | 만드는 것 | 실행 조건 |
+|---|---|---|
+| `05-group` | Cloud Identity 그룹 · 구성원 | `identity.manage_group` |
+| `10-project` | 프로젝트 · API · 자동화 IAM | `project.manage` |
+| `30-project-iam` | 그룹의 프로젝트 권한 | `project.manage` |
+| `40-data` | BigQuery · GCS · 서비스 계정 · 데이터 권한 | `data.manage` |
+| `50-workload` | Namespace · KSA · Workload Identity · PV/PVC · Pod · Service | 항상 |
+
+모든 단계가 같은 순서로 실행됩니다: `init`(과제·단계 State) → `plan` → 삭제 검사 → `apply`. 기존 VM 과제(`origin: MIGRATED`)는 `50-workload` State 하나만 생깁니다.
+
+**State 조회**
+
+```bash
+gcloud storage ls -r gs://gcp-sbx-gke01-sbxtest01-tfstate/tasks/<과제>/
+```
+
+**삭제 검사** · plan 이 아래 자원을 지우거나 교체하려 하면 그 단계에서 멈추고 적용하지 않습니다. 구성원 제외와 IAM 권한 회수는 허용합니다.
+
+| 단계 | 보호 자원 |
+|---|---|
+| 05-40 | 그룹 · 프로젝트 · 프로젝트 API · 서비스 계정 · BigQuery 데이터셋 · GCS 버킷 |
+| 50 | Namespace · PV · PVC · Service · KSA · Workload Identity 바인딩 |
 
 ## 50-workload
 
