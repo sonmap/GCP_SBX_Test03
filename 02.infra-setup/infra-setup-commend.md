@@ -1465,15 +1465,29 @@ gcloud dns record-sets create "*.pkg.dev." --zone=zone-pkg-dev \
 
 ##### 2-3-10-6. 적용 확인
 
-같은 Shared VPC의 관리 VM에서 DNS 응답이 `199.36.153.4/30`인지 확인합니다. 이후 GKE 노드의 `Ready`와 JupyterHub Pod 상태를 확인합니다. 관리 VM DNS 확인은 노드의 통신 성공까지 보장하지 않으므로, 여전히 타임아웃이 발생하면 GKE 노드의 이그레스 정책과 유효 경로를 확인합니다.
+**선행 확인 (DNS · 도달성)** · GKE 클러스터 생성 여부와 무관하게 수행합니다. 같은 Shared VPC의 관리 VM에서 DNS 응답이 `199.36.153.4/30`인지 확인합니다.
 
 ```bash
-# 실행 위치: infra-son01 | 대상: 로컬 (변수 · 파일) | 실행 계정: user01@sonmap.net
+# 실행 위치: infra-son01 | 대상: 로컬 (DNS 조회) | 실행 계정: user01@sonmap.net
 dig +short asia-northeast3-artifactregistry.gcr.io
 dig +short asia-northeast3-docker.pkg.dev
+dig +short bigquery.googleapis.com
 
-export KUBECONFIG="$HOME/.kube/config-sbx-dns"
+curl -sS -o /dev/null -w '%{http_code}\n' https://bigquery.googleapis.com/
+```
+
+DNS 응답이 모두 `199.36.153.4` ~ `199.36.153.7` 범위여야 합니다. 범위를 벗어나면 private zone의 레코드가 restricted VIP가 아닌 대상을 가리키는 것이므로 2-3-10-5를 먼저 바로잡습니다. `curl`은 인증 없이 호출하므로 `401` 또는 `403` 응답이면 경로까지 정상입니다. 응답 없이 멈추면 송신 방화벽 규칙과 라우트를 확인합니다.
+
+**사후 확인 (GKE 생성 이후)** · 클러스터가 아직 없으면 이 블록은 건너뛰고 클러스터 생성 후에 수행합니다. 관리 VM DNS 확인은 노드의 통신 성공까지 보장하지 않으므로, 여전히 타임아웃이 발생하면 GKE 노드의 이그레스 정책과 유효 경로를 확인합니다.
+
+```bash
+# 실행 위치: infra-son01 | 대상: GKE | 실행 계정: user01@sonmap.net
 export CLOUDSDK_CORE_ACCOUNT="user01@sonmap.net"
+export KUBECONFIG="$HOME/.kube/config-sbx-dns"
+
+gcloud container clusters get-credentials <클러스터명> \
+  --region="$REGION" --project=gcp-sbx-gke01
+
 kubectl get nodes
 kubectl -n sbx03-smoke get pods -o wide
 ```
@@ -1525,6 +1539,48 @@ gcloud compute networks subnets update "$MAIN_SUBNET" \
   --project="$HOST" --region="$REGION" --account="$VPC_ADMIN_ACCOUNT" \
   --enable-private-ip-google-access
 ```
+
+GKE Autopilot 노드는 기본적으로 외부 IP가 없으므로 이 설정이 필수입니다. 서브넷 속성만 변경하는 것으로 기존 트래픽 중단은 없으며, `--no-enable-private-ip-google-access` 로 즉시 복구할 수 있습니다.
+
+**구성 개요** · 외부 IP 없는 노드가 구글 API에 접근하려면 private DNS 영역, restricted VIP 라우트, 서브넷 PGA 세 요소가 모두 충족되어야 합니다.
+
+```mermaid
+flowchart LR
+    subgraph VPC["Shared VPC · vpc-prod-edp-hub"]
+        NODE["GKE 노드 / VM<br/>외부 IP 없음"]
+        RT_DEF["기본 경로<br/>0.0.0.0/0"]
+        RT_RES["rt-prod-edp-restricted-googleapis<br/>199.36.153.4/30"]
+    end
+
+    DNS["Private DNS 영역<br/>googleapis.com · gcr.io · pkg.dev"]
+    VIP["restricted VIP<br/>199.36.153.4/30"]
+    API["BigQuery · Artifact Registry"]
+    NET["공용 인터넷"]
+
+    NODE -. "① 이름 질의" .-> DNS
+    DNS -. "② 사설 VIP 응답" .-> NODE
+    NODE == "③ 패킷 전송" ==> RT_RES
+    RT_RES == "④ 구글 백본" ==> VIP
+    VIP ==> API
+    NODE -.->|"그 외 목적지"| RT_DEF
+    RT_DEF -.->|"외부 IP 없으면 차단"| NET
+
+    style RT_RES fill:#d4edda,stroke:#28a745,stroke-width:2px
+    style VIP fill:#d4edda,stroke:#28a745
+    style NET fill:#f8d7da,stroke:#dc3545
+```
+
+| 요소 | 역할 | 설정 절 |
+|---|---|---|
+| Private DNS 영역 | 구글 API 도메인을 restricted VIP로 응답 | 2-3-10-7-4 |
+| 라우트 | VIP 대역으로 가는 경로 제공 | 2-3-10-7-3 |
+| 서브넷 PGA | 외부 IP 없는 인스턴스의 VIP 접근 허용 | 이 절 |
+
+하나라도 누락되면 증상은 동일하게 타임아웃으로 나타나므로, 장애 시 세 가지를 함께 확인합니다.
+
+`--next-hop-gateway=default-internet-gateway` 는 GCP에서 "VPC 밖으로 내보낸다"는 의미의 기호에 가깝습니다. 목적지가 `199.36.153.4/30` 인 경우 구글 네트워크가 이를 내부 백본으로 처리하여 자사 API 프런트엔드로 전달하며, 패킷은 공용 인터넷을 거치지 않습니다. 기본 경로 `0.0.0.0/0` 가 존재함에도 전용 경로를 별도로 생성하는 이유는, 보안 설계상 기본 경로를 제거하거나 제약하는 환경에서도 구글 API 통신을 유지하기 위해서입니다. 더 구체적인 대역이 항상 우선하므로 인터넷 접근을 차단해도 이 통로는 유지됩니다.
+
+`199.36.153.4/30` 은 restricted VIP, `199.36.153.8/30` 은 private VIP로 서로 다릅니다. DNS 레코드와 라우트가 동일한 대역을 가리켜야 하며, 어긋나면 타임아웃으로만 나타납니다.
 
 <a name="9-7-3-restricted-vip-라우트"></a>
 
@@ -1673,6 +1729,86 @@ gcloud compute networks subnets list-usable --project=gcp-prod-edp-hub-vpchost \
 ```
 
 응답에서 운영팀이 회신한 GKE·ALB VIP 서브넷과 GKE Pod 보조 범위를 확인합니다. 서브넷 사용 목록과 운영팀 IAM 적용 결과가 확인되면 3절의 서비스 프로젝트 구축 명령을 실행합니다.
+
+<a name="2-4-1-서비스-프로젝트-shared-vpc-연결"></a>
+
+#### 2-4-1. 서비스 프로젝트 Shared VPC 연결
+
+위 `list-usable` 이 아래와 같이 실패하면 서비스 프로젝트가 호스트 프로젝트에 연결되어 있지 않은 것입니다. 권한 부여 여부와 무관하게 실패하므로 이 절을 먼저 완료합니다.
+
+```text
+ERROR: (gcloud.compute.networks.subnets.list-usable) HTTPError 400:
+Project gcp-sbx-gke01 does not exist or project gcp-sbx-gke01
+is not associated with gcp-prod-edp-hub-vpchost in Shared VPC
+```
+
+이 오류는 프로젝트 미존재와 Shared VPC 미연결을 구분하지 않습니다. 호스트 프로젝트에는 `gcp-sbx-gke01` 과 `gcp-sbx-edp-gke01` 처럼 한 토막만 다른 ID가 함께 연결될 수 있으므로, 프로젝트 ID 오타 여부를 먼저 확인합니다.
+
+```bash
+# 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+gcloud projects describe gcp-sbx-gke01 --account="$ADMIN_ACCOUNT"
+```
+
+```bash
+# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
+gcloud compute shared-vpc list-associated-resources gcp-prod-edp-hub-vpchost \
+  --account="admin@sonmap.net"
+```
+
+**연결** · 조직 수준의 `roles/compute.xpnAdmin` 권한이 필요하며, 호스트 프로젝트 관리자 계정으로 수행합니다.
+
+```bash
+# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
+gcloud compute shared-vpc associated-projects add gcp-sbx-gke01 \
+  --host-project=gcp-prod-edp-hub-vpchost \
+  --account="admin@sonmap.net"
+
+gcloud compute shared-vpc get-host-project gcp-sbx-gke01 \
+  --account="admin@sonmap.net"
+```
+
+**서브넷 사용 권한 부여** · 연결만으로는 `list-usable` 이 빈 배열을 반환합니다. 서브넷 단위로 `roles/compute.networkUser` 를 부여해야 조회와 사용이 가능합니다.
+
+GKE 서비스 에이전트(`service-<프로젝트번호>@container-engine-robot.iam.gserviceaccount.com`)는 해당 프로젝트에서 Kubernetes Engine API를 활성화할 때 생성됩니다. 생성 전에는 권한 부여가 `INVALID_ARGUMENT: Service account ... does not exist` 로 실패하므로 API 활성화를 먼저 수행합니다.
+
+```bash
+# 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+gcloud services enable container.googleapis.com \
+  --project=gcp-sbx-gke01 --account="$ADMIN_ACCOUNT"
+
+gcloud projects get-iam-policy gcp-sbx-gke01 \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:container-engine-robot" \
+  --format="value(bindings.members)" --account="$ADMIN_ACCOUNT"
+```
+
+서비스 에이전트 생성을 확인한 뒤 권한을 부여합니다. 변수가 비어 있으면 잘못된 계정 이름이 전달되므로, 실행 전 `echo` 로 치환 결과를 확인합니다.
+
+```bash
+# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
+export HOST="gcp-prod-edp-hub-vpchost"
+export REGION="asia-northeast3"
+export MAIN_SUBNET="subnet-prod-sbx-gke-01"
+export PN="402269387486"   # gcp-sbx-gke01 프로젝트 번호
+echo "HOST=$HOST / PN=$PN"
+
+for M in \
+  "serviceAccount:tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com" \
+  "serviceAccount:service-${PN}@container-engine-robot.iam.gserviceaccount.com" \
+  "serviceAccount:${PN}@cloudservices.gserviceaccount.com"; do
+  gcloud compute networks subnets add-iam-policy-binding "$MAIN_SUBNET" \
+    --project="$HOST" --region="$REGION" \
+    --member="$M" --role=roles/compute.networkUser \
+    --account="admin@sonmap.net"
+done
+
+gcloud projects add-iam-policy-binding "$HOST" \
+  --member="serviceAccount:service-${PN}@container-engine-robot.iam.gserviceaccount.com" \
+  --role=roles/container.hostServiceAgentUser \
+  --account="admin@sonmap.net"
+```
+
+연결과 권한 부여를 마친 뒤 앞의 `list-usable` 을 다시 실행해 `subnet-prod-sbx-gke-01` 이 목록에 나타나는지 확인합니다.
 
 </details>
 
@@ -1941,17 +2077,35 @@ gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01
 
 이미지는 `gcp-sbx-gke01` 에 저장소를 만들지 않고 **`gcp-prod-edp-edge-509423` 의 Artifact Registry** 를 씁니다. Runner · Provisioner 이미지와 과제 Jupyter 이미지가 모두 여기에 있습니다. 저장소가 다른 프로젝트에 있으므로 **3-11 · 3-12 의 권한은 edge 프로젝트 관리자가 부여**합니다.
 
+edge 는 운영 프로젝트이므로 Sandbox 작업 계정(`user01@sonmap.net`)이 아닌 edge 관리자 계정으로 실행합니다. 변수도 `ADMIN_ACCOUNT` 와 분리해 앞 절의 export 가 남아 있어도 섞이지 않도록 합니다.
+
+| 작업 | 필요 역할 |
+|---|---|
+| 저장소 조회 (3-10) | `roles/artifactregistry.reader` 이상 |
+| 권한 부여 (3-11 · 3-12) | `roles/artifactregistry.admin` 또는 `roles/resourcemanager.projectIamAdmin` |
+
 ```bash
-# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 | 실행 계정: user01@sonmap.net
+# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 | 실행 계정: admin@sonmap.net (edge 프로젝트 관리자)
 export REGION="asia-northeast3"
-export ADMIN_ACCOUNT="user01@sonmap.net"
+export AR_ADMIN_ACCOUNT="admin@sonmap.net"
 export AR_PROJECT="gcp-prod-edp-edge-509423"
 export AR_REPOSITORY="ar-sbxtest01-platform"   # 실제 사용할 저장소 이름으로 바꿉니다
 gcloud artifacts repositories list --project="${AR_PROJECT}" --location="${REGION}" \
-  --format='table(name.basename(),format,createTime)' --account="${ADMIN_ACCOUNT}"
+  --format='table(name.basename(),format,createTime)' --account="${AR_ADMIN_ACCOUNT}"
 gcloud artifacts repositories describe "${AR_REPOSITORY}" --project="${AR_PROJECT}" \
-  --location="${REGION}" --account="${ADMIN_ACCOUNT}"
+  --location="${REGION}" --account="${AR_ADMIN_ACCOUNT}"
 ```
+
+실행 전 해당 계정이 필요한 권한을 보유하고 있는지 확인합니다.
+
+```bash
+# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 | 실행 계정: admin@sonmap.net (edge 프로젝트 관리자)
+gcloud projects test-iam-permissions "${AR_PROJECT}" \
+  --permissions=artifactregistry.repositories.get,artifactregistry.repositories.setIamPolicy \
+  --account="${AR_ADMIN_ACCOUNT}"
+```
+
+반환 목록에 `setIamPolicy` 가 없으면 3-11 · 3-12 의 권한 부여를 수행할 수 없으므로 edge 프로젝트 관리자에게 해당 작업을 요청합니다.
 
 저장소가 없고 새로 만들어야 한다면 edge 프로젝트 관리자에게 Docker 형식 저장소 생성을 요청합니다.
 
@@ -1960,14 +2114,16 @@ gcloud artifacts repositories describe "${AR_REPOSITORY}" --project="${AR_PROJEC
 Cloud Build(`tf-manager` 로 실행)가 Runner · Provisioner 이미지를 올립니다.
 
 ```bash
-# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-edge-509423 | 실행 계정: edge 프로젝트 AR 관리자
+# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-edge-509423 | 실행 계정: admin@sonmap.net (edge 프로젝트 AR 관리자)
 export REGION="asia-northeast3"
+export AR_ADMIN_ACCOUNT="admin@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export AR_PROJECT="gcp-prod-edp-edge-509423"
 export AR_REPOSITORY="ar-sbxtest01-platform"
 gcloud artifacts repositories add-iam-policy-binding "${AR_REPOSITORY}" \
   --project="${AR_PROJECT}" --location="${REGION}" \
-  --member="serviceAccount:${TF_MANAGER}" --role=roles/artifactregistry.writer
+  --member="serviceAccount:${TF_MANAGER}" --role=roles/artifactregistry.writer \
+  --account="${AR_ADMIN_ACCOUNT}"
 ```
 
 ### 3-12. 이미지 받기 권한 — GKE 노드 · Cloud Run · Cloud Build
@@ -1981,17 +2137,20 @@ gcloud artifacts repositories add-iam-policy-binding "${AR_REPOSITORY}" \
 | `tf-manager` (Cloud Build 실행 계정) | Runner 이미지 (3-11 writer 에 포함) |
 
 ```bash
-# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-edge-509423 | 실행 계정: edge 프로젝트 AR 관리자
+# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-edge-509423 | 실행 계정: admin@sonmap.net (edge 프로젝트 AR 관리자)
 export REGION="asia-northeast3"
+export AR_ADMIN_ACCOUNT="admin@sonmap.net"
 export AR_PROJECT="gcp-prod-edp-edge-509423"
 export AR_REPOSITORY="ar-sbxtest01-platform"
 export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=user01@sonmap.net --format='value(projectNumber)')"
+echo "SBX_GKE_PROJECT_NUMBER=${SBX_GKE_PROJECT_NUMBER}"   # 비어 있으면 아래 명령이 잘못된 계정으로 실행됩니다
 for member in \
   "serviceAccount:${SBX_GKE_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   "serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com"; do
   gcloud artifacts repositories add-iam-policy-binding "${AR_REPOSITORY}" \
     --project="${AR_PROJECT}" --location="${REGION}" \
-    --member="${member}" --role=roles/artifactregistry.reader
+    --member="${member}" --role=roles/artifactregistry.reader \
+    --account="${AR_ADMIN_ACCOUNT}"
 done
 ```
 
