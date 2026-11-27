@@ -2523,7 +2523,7 @@ gcloud infra-manager deployments export-statefile \
 기존 VM 의 data 디스크를 붙일 때 PV 와 PVC 가 같이 쓰는 클래스입니다. 새 디스크를 만들지 않도록 PV 를 이름으로 지정해 붙이며, 이 클래스는 **확장 허용과 보존 정책**을 위해 둡니다.
 
 ```bash
-# 실행 위치: infra-son01 | 대상: gke-sbx-main-an3 (gcp-sbx-gke01) | kubeconfig 는 3-18 이후 받은 것
+# 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net (3-18 에서 받은 kubeconfig)
 kubectl apply -f - <<'YAML'
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
