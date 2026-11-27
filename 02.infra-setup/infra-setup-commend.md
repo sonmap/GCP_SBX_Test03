@@ -469,6 +469,28 @@ gcloud projects add-iam-policy-binding "${SBX_GKE_PROJECT}" --member="serviceAcc
 
 ### 1-8. 서비스 계정 사용·위임 권한 — 운영자 · 두 계정 · 서비스 에이전트
 
+![1-8 서비스 계정 사용·위임 관계](images/1-8-sa-delegation.png)
+
+화살표 하나가 아래 명령 한 줄이고, **"누가 → 어느 계정을 쓸 수 있게 되는가"** 를 뜻합니다. 번호는 명령 순서입니다.
+
+| 역할 | 할 수 있는 일 |
+|---|---|
+| Token Creator | 그 계정의 토큰을 받아 그 계정으로 직접 API 호출 (`--impersonate-service-account`) |
+| Service Account User | 그 계정을 빌드 · Cloud Run 등의 실행 계정으로 지정 (`--service-account`) |
+
+| # | 받는 쪽 → 대상 | 역할 | 쓰이는 곳 |
+|---|---|---|---|
+| ① | 작업 그룹 → `tf-manager` | Token Creator | 명령서의 `tf-manager` 가장 전부 |
+| ② | 작업 그룹 → `sbx-manager` | Token Creator | `sbx-manager` 로 동작 확인 |
+| ③ | 작업 그룹 → `tf-manager` | Service Account User | `tf-manager` 로 실행되는 빌드 · 배포 제출 |
+| ④ | `tf-manager` → `sbx-manager` | Service Account User | Cloud Run 을 `sbx-manager` 로 배포 (3-20) |
+| ⑤ | `sbx-manager` → `tf-manager` | Service Account User | Cloud Run 이 과제 배포 빌드를 `tf-manager` 로 시작 |
+| ⑥⑦ | `tf-manager` → 자기 자신 | User · Token Creator | 빌드 안에서 Infrastructure Manager 를 `tf-manager` 로 실행 |
+| ⑧ | Infrastructure Manager 에이전트 → `tf-manager` | Service Account User | Terraform(05 ~ 50) 실행 |
+| ⑨ | Cloud Build 에이전트 → `tf-manager` | Token Creator | Private Pool 빌드 실행 |
+
+⑧⑨ 의 서비스 에이전트는 1-2 에서 만든 계정입니다. 1-2 를 건너뛰었다면 이 두 줄이 `does not exist` 로 실패합니다.
+
 ```bash
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
 gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \

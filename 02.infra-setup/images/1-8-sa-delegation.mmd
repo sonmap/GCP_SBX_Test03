@@ -1,0 +1,28 @@
+%%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
+flowchart LR
+    subgraph WHO["권한을 받는 쪽"]
+      G["작업 그룹 pgrp-gcp-sbx01<br/>(user01)"]
+      IMA["Infrastructure Manager<br/>서비스 에이전트"]
+      CBA["Cloud Build<br/>서비스 에이전트"]
+    end
+
+    subgraph SA["대상 서비스 계정 (gcp-sbx-gke01)"]
+      TF["tf-manager<br/>자원을 만드는 계정"]
+      SM["sbx-manager<br/>요청을 받는 계정"]
+    end
+
+    G -->|"① Token Creator<br/>명령서의 --impersonate"| TF
+    G -->|"② Token Creator"| SM
+    G -->|"③ Service Account User<br/>tf-manager 로 빌드·배포 실행"| TF
+
+    SM -->|"⑤ Service Account User<br/>Cloud Run 이 tf-manager 로 빌드 시작"| TF
+    TF -->|"④ Service Account User<br/>tf-manager 가 Cloud Run 을<br/>sbx-manager 로 배포"| SM
+    TF -->|"⑥⑦ User · Token Creator (자기 자신)<br/>빌드 안에서 다시 tf-manager 로 실행"| TF
+
+    IMA -->|"⑧ Service Account User<br/>Terraform 을 tf-manager 로 실행"| TF
+    CBA -->|"⑨ Token Creator<br/>빌드를 tf-manager 로 실행"| TF
+
+    classDef who fill:#f3e5f5,stroke:#6a1b9a
+    classDef sa fill:#e3f2fd,stroke:#1565c0
+    class G,IMA,CBA who
+    class TF,SM sa
