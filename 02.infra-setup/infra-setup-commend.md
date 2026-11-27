@@ -599,6 +599,7 @@ gcloud config set account admin@sonmap.net      # Cloud Shell 기본 계정으�
 
 ```bash
 # 실행 위치: infra-son01 (저장소 루트) | 대상: 로컬 파일 · 변수 | 실행 계정: 불필요
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export CUSTOMER_ID="C03rw3vtp"
 grep '^CLOUD_IDENTITY_CUSTOMER_ID:' 03.sandbox_deploy/03.1.request/provisioner-env.yaml
 echo "조회한 값: ${CUSTOMER_ID}"
@@ -2384,6 +2385,7 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
 
 ```bash
 # 실행 위치: infra-son01, Test03 저장소 루트 | 대상: gcp-prod-edp-edge-509423 (AR) | 실행 계정: user01@sonmap.net (AR 인증)
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export AR_PROJECT="gcp-prod-edp-edge-509423"
 export AR_REPOSITORY="ar-sbxtest01-platform"
 export AR_ACCOUNT="user01@sonmap.net"
@@ -2398,6 +2400,7 @@ gcloud auth print-access-token --account="$AR_ACCOUNT" |
 
 ```bash
 # 실행 위치: infra-son01, Test03 저장소 루트 | 대상: gcp-prod-edp-edge-509423 (AR) | 실행 계정: VM 로그인 사용자
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
 docker build -f 03.sandbox_deploy/03.3.gke/Dockerfile \
   -t "${AR_REPO}/sbxtest01-automation-runner:bootstrap" .
@@ -2429,6 +2432,7 @@ gcloud artifacts docker images list "$AR_REPO" \
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager | 워크로드 실행: tf-manager
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
@@ -2491,6 +2495,7 @@ gcloud run services add-iam-policy-binding run-sbxtest01-provisioner --project="
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
@@ -2972,6 +2977,7 @@ gcloud compute url-maps describe urlmap-alb-sbxtest01-shared \
 
 ```bash
 # 실행 위치: infra-son01 (저장소 루트) | 대상: 로컬 파일 · 변수 | 실행 계정: 불필요
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export MANAGED_CERT="cert-sbx-managed"
@@ -3055,6 +3061,7 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-https --project="
 # 선택 작업: 필요한 경우에만 아래 명령의 주석을 해제합니다.
 # 기존 자원 확인
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 # gcloud builds triggers describe trigger-sbxtest01-platform-release --project="${SBX_GKE_PROJECT}" \
 #   --region="${REGION}" --format=json --account="${ADMIN_ACCOUNT}" \
 #   --impersonate-service-account="${TF_MANAGER}"
