@@ -38,7 +38,7 @@ class CommandbookTests(unittest.TestCase):
             'projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01')
         step = check['steps'][0]
         self.assertTrue(step['name'].startswith(
-            'asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/'))
+            'asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/'))
         self.assertIn('--project=gcp-sbx-gke01', step['args'][-1])
         self.assertIn('--dns-endpoint', step['args'][-1])
 
@@ -151,7 +151,8 @@ esac
         self.assertEqual(env['BUNDLE_BUCKET'], project + '-sbxtest01-bundles')
         self.assertEqual(env['WORKER_POOL'], f'projects/{project}/locations/asia-northeast3/workerPools/pool-sbxtest01')
         self.assertEqual(env['TF_STATE_BUCKET'], project + '-sbxtest01-tfstate')
-        self.assertTrue(env['RUNNER_IMAGE_REPO'].startswith(f'asia-northeast3-docker.pkg.dev/{project}/'))
+        # Images live in the shared edge project's Artifact Registry.
+        self.assertTrue(env['RUNNER_IMAGE_REPO'].startswith('asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/'))
         release = yaml.safe_load((ROOT / '03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml').read_text())
         self.assertEqual(release['substitutions']['_SBX_GKE_PROJECT'], project)
         self.assertEqual(release['substitutions']['_BUNDLE_BUCKET'], env['BUNDLE_BUCKET'])

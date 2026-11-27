@@ -85,6 +85,27 @@ gcloud artifacts docker images describe "<저장소>/<이미지>:<태그>" \
   --account="$ADMIN_ACCOUNT" --format='value(image_summary.digest)'
 ```
 
+### 테스트 과제 3개
+
+한 주소(`sbx.sonmap.net`) 아래에 영역별로 과제 하나씩 배치합니다. 요청 파일은 [examples](03.1.request/examples/) 의 `test-*.json` 입니다.
+
+| 영역 | 과제 | 접속 주소 | Namespace | 요청 파일 |
+|---|---|---|---|---|
+| general | task01 | `https://sbx.sonmap.net/general/task01/` | `sbx-general-task01` | `test-task01-general.json` |
+| sa | task11 | `https://sbx.sonmap.net/sa/task11/` | `sbx-sa-task11` | `test-task11-sa.json` |
+| com | task21 | `https://sbx.sonmap.net/com/task21/` | `sbx-com-task21` | `test-task21-com.json` |
+
+과제 이름은 Namespace · 서비스 계정 · 버킷 이름에 들어가므로 **영문 소문자 · 숫자 · `-`** 만 씁니다. "과제01" 은 `task01` 로 적습니다.
+
+각 파일에서 채울 값
+
+- `containers[0].image` · `replace-me-jupyter@sha256:000…` 을 edge AR 의 실제 Jupyter 이미지 digest 로 바꿉니다.
+- `project.billing_account` · 결제 계정 번호
+- `source` · 1번 릴리스 게시 결과
+- `project.project_id` (`gcp-sbx-edp-task01` 등) 가 이미 다른 곳에서 쓰이면 바꿉니다. 프로젝트 ID 는 전 세계에서 하나뿐이어야 합니다.
+
+세 과제는 같은 URL Map 에 경로 규칙 3개로 들어갑니다. 한 번에 하나씩 실행하는 것이 안전합니다.
+
 ## 3. 게시와 실행
 
 ```bash

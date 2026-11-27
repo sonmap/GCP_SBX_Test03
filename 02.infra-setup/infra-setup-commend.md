@@ -7,7 +7,8 @@
 | 범위 | 명령서의 기본값 |
 |---|---|
 | 실행 위치 | 관리 VM `infra-son01`의 Test03 저장소 루트 |
-| 플랫폼 프로젝트 | `SBX_GKE_PROJECT=gcp-sbx-gke01` · GKE, ALB, Cloud Build, Cloud Run, Workflows, AR, GCS |
+| 플랫폼 프로젝트 | `SBX_GKE_PROJECT=gcp-sbx-gke01` · GKE, ALB, Cloud Build, Cloud Run, Workflows, GCS |
+| 이미지 저장소 | `AR_PROJECT=gcp-prod-edp-edge-509423` 의 Artifact Registry (기존 자원 사용, 저장소 `AR_REPOSITORY`) |
 | Shared VPC 호스트 | `VPC_HOST_PROJECT=gcp-prod-edp-hub-vpchost` · VPC, 서브넷, 방화벽, PSA |
 | 로그인 계정 | `ADMIN_ACCOUNT=user01@sonmap.net`, `VPC_ADMIN_ACCOUNT=admin@sonmap.net`, `AR_ACCOUNT=user01@sonmap.net` |
 | 작업 그룹 | `OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net` · 작업자 `user01@sonmap.net` 은 이 그룹 구성원 |
@@ -44,6 +45,7 @@
 
 ```bash
 export SBX_GKE_PROJECT="gcp-sbx-gke01"              # 주 대상: Sandbox GKE
+export AR_PROJECT="gcp-prod-edp-edge-509423"         # 이미지 저장소 (기존 edge AR 사용)
 export SBX_NAME="sbx01"                      # 과제·Namespace 이름
 export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"   # Shared VPC
 ```
@@ -59,6 +61,8 @@ export ADMIN_ACCOUNT=user01@sonmap.net
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
 export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export AR_PROJECT="gcp-prod-edp-edge-509423"
+export AR_REPOSITORY="ar-sbxtest01-platform"
 export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
 export FOLDER_ID=154455658682
 export REGION=asia-northeast3
@@ -141,6 +145,8 @@ export ADMIN_ACCOUNT=user01@sonmap.net
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
 export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export AR_PROJECT="gcp-prod-edp-edge-509423"
+export AR_REPOSITORY="ar-sbxtest01-platform"
 export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
 export FOLDER_ID=154455658682
 export BILLING_ACCOUNT=""
@@ -1353,6 +1359,8 @@ export ADMIN_ACCOUNT=user01@sonmap.net
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
 export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export AR_PROJECT="gcp-prod-edp-edge-509423"
+export AR_REPOSITORY="ar-sbxtest01-platform"
 export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
 export REGION=asia-northeast3
 export NETWORK=vpc-prod-edp-hub
@@ -1526,46 +1534,55 @@ gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01
 
 <a name="10-artifacts-repositories-create-ar-sbxtest01-platform"></a>
 
-### 3-10. artifacts repositories create ar-sbxtest01-platform
+### 3-10. Artifact Registry — edge 프로젝트의 기존 저장소 사용
+
+이미지는 `gcp-sbx-gke01` 에 저장소를 만들지 않고 **`gcp-prod-edp-edge-509423` 의 Artifact Registry** 를 씁니다. Runner · Provisioner 이미지와 과제 Jupyter 이미지가 모두 여기에 있습니다. 저장소가 다른 프로젝트에 있으므로 **3-11 · 3-12 의 권한은 edge 프로젝트 관리자가 부여**합니다.
 
 ```bash
-# 기존 자원 확인
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}
-gcloud artifacts repositories describe ar-sbxtest01-platform --project="${SBX_GKE_PROJECT}" \
-  --location="${REGION}" --format=json --account="${ADMIN_ACCOUNT}" \
-  --impersonate-service-account="${TF_MANAGER}"
-# 조회 결과가 명시적 Not Found일 때만 아래 생성 명령을 실행합니다.
-gcloud artifacts repositories create ar-sbxtest01-platform --project="${SBX_GKE_PROJECT}" \
-  --location="${REGION}" --repository-format=docker --account="${ADMIN_ACCOUNT}" \
-  --impersonate-service-account="${TF_MANAGER}"
-
+# 실행 위치 infra-son01 | 대상 ${AR_PROJECT} | 계정 ${ADMIN_ACCOUNT}
+export AR_PROJECT="gcp-prod-edp-edge-509423"
+export AR_REPOSITORY="ar-sbxtest01-platform"   # 실제 사용할 저장소 이름으로 바꿉니다
+gcloud artifacts repositories list --project="${AR_PROJECT}" --location="${REGION}" \
+  --format='table(name.basename(),format,createTime)' --account="${ADMIN_ACCOUNT}"
+gcloud artifacts repositories describe "${AR_REPOSITORY}" --project="${AR_PROJECT}" \
+  --location="${REGION}" --account="${ADMIN_ACCOUNT}"
 ```
 
-<a name="-11-artifacts-repositories-add-iam-policy-binding-ar-sbxtest01-platform--rolesartifactregistryreader"></a>
+저장소가 없고 새로 만들어야 한다면 edge 프로젝트 관리자에게 Docker 형식 저장소 생성을 요청합니다.
 
-<a name="11-artifacts-repositories-add-iam-policy-binding-ar-sbxtest01-platform--rolesartifactregistryreader"></a>
+### 3-11. 이미지 올리기 권한 — tf-manager
 
-### 3-11. artifacts repositories add-iam-policy-binding ar-sbxtest01-platform · roles/artifactregistry.reader
+Cloud Build(`tf-manager` 로 실행)가 Runner · Provisioner 이미지를 올립니다.
 
 ```bash
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}
-gcloud artifacts repositories add-iam-policy-binding ar-sbxtest01-platform \
-  --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
-  --member="serviceAccount:${SBX_GKE_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role=roles/artifactregistry.reader --account="${ADMIN_ACCOUNT}" \
-  --impersonate-service-account="${TF_MANAGER}"
-
+# 실행 위치 Cloud Shell | 대상 ${AR_PROJECT} | 계정 edge 프로젝트 AR 관리자
+gcloud artifacts repositories add-iam-policy-binding "${AR_REPOSITORY}" \
+  --project="${AR_PROJECT}" --location="${REGION}" \
+  --member="serviceAccount:${TF_MANAGER}" --role=roles/artifactregistry.writer
 ```
 
-<a name="-12-artifacts-repositories-add-iam-policy-binding-ar-sbxtest01-platform--rolesartifactregistryreader"></a>
+### 3-12. 이미지 받기 권한 — GKE 노드 · Cloud Run · Cloud Build
 
-<a name="12-artifacts-repositories-add-iam-policy-binding-ar-sbxtest01-platform--rolesartifactregistryreader"></a>
+다른 프로젝트의 이미지를 받으려면 받는 쪽 계정마다 읽기 권한이 필요합니다.
 
-### 3-12. artifacts repositories add-iam-policy-binding ar-sbxtest01-platform · roles/artifactregistry.reader
+| 받는 계정 | 받는 이미지 |
+|---|---|
+| GKE 노드 계정 `${SBX_GKE_PROJECT_NUMBER}-compute@developer.gserviceaccount.com` | 과제 Jupyter 이미지 |
+| Cloud Run 서비스 에이전트 `service-${SBX_GKE_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com` | Provisioner 이미지 |
+| `tf-manager` (Cloud Build 실행 계정) | Runner 이미지 (3-11 writer 에 포함) |
 
 ```bash
-
+# 실행 위치 Cloud Shell | 대상 ${AR_PROJECT} | 계정 edge 프로젝트 AR 관리자
+for member in \
+  "serviceAccount:${SBX_GKE_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  "serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com"; do
+  gcloud artifacts repositories add-iam-policy-binding "${AR_REPOSITORY}" \
+    --project="${AR_PROJECT}" --location="${REGION}" \
+    --member="${member}" --role=roles/artifactregistry.reader
+done
 ```
+
+VPC Service Controls 경계가 있으면 두 프로젝트가 같은 경계 안에 있거나 경계 규칙이 허용해야 받을 수 있습니다.
 
 <a name="-13-secrets-create-jupyter-oauth-client-id"></a>
 
@@ -1722,7 +1739,7 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
 # 수행 위치: infra-son01, Test03 저장소 루트 | 수행 계정: user01@sonmap.net (AR 인증)
 export AR_ACCOUNT="user01@sonmap.net"
 export AR_HOST="asia-northeast3-docker.pkg.dev"
-export AR_REPO="${AR_HOST}/gcp-sbx-gke01/ar-sbxtest01-platform"
+export AR_REPO="${AR_HOST}/${AR_PROJECT}/${AR_REPOSITORY}"
 
 gcloud auth print-access-token --account="$AR_ACCOUNT" |
   docker login "$AR_HOST" --username oauth2accesstoken --password-stdin
@@ -1777,7 +1794,7 @@ gcloud builds submit . --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
 ```bash
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER} | 워크로드 실행 ${SBX_MANAGER}
 gcloud run deploy run-sbxtest01-provisioner --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
-  --image="${REGION}-docker.pkg.dev/${SBX_GKE_PROJECT}/ar-sbxtest01-platform/run-sbxtest01-provisioner:bootstrap" \
+  --image="${REGION}-docker.pkg.dev/${AR_PROJECT}/${AR_REPOSITORY}/run-sbxtest01-provisioner:bootstrap" \
   --service-account="${SBX_MANAGER}" --no-allow-unauthenticated --ingress=all --timeout=300 \
   --max-instances=2 --env-vars-file=03.sandbox_deploy/03.1.request/provisioner-env.yaml \
   --clear-network --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
@@ -2003,7 +2020,7 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-http --project="$
 
 ### 3-32. Regional SSL 인증서 확인 및 등록
 
-공유 내부 ALB에는 **Certificate Manager의 리전 Google 관리형 인증서만 적용**합니다. 그룹을 추가할 때는 그룹 JSON의 `domain`과 일치하는 호스트에 대해 DNS 승인과 인증서를 준비합니다. 아래 명령은 `jupyter-group01.sonmap.net` 기준입니다.
+공유 내부 ALB에는 **Certificate Manager의 리전 Google 관리형 인증서만 적용**합니다. 그룹을 추가할 때는 그룹 JSON의 `domain`과 일치하는 호스트에 대해 DNS 승인과 인증서를 준비합니다. 아래 명령은 `sbx.sonmap.net` 기준입니다.
 
 <a name="32-4-google-관리형-인증서-자동-갱신"></a>
 
@@ -2020,9 +2037,9 @@ export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
-export DOMAIN="jupyter-group01.sonmap.net"
-export DNS_AUTH="dns-auth-jupyter-group01"
-export MANAGED_CERT="cert-jupyter-group01-managed"
+export DOMAIN="sbx.sonmap.net"
+export DNS_AUTH="dns-auth-sbx"
+export MANAGED_CERT="cert-sbx-managed"
 
 gcloud services enable certificatemanager.googleapis.com \
   --project="${SBX_GKE_PROJECT}" --account="${ADMIN_ACCOUNT}"
@@ -2046,13 +2063,13 @@ gcloud certificate-manager dns-authorizations describe "${DNS_AUTH}" \
 | 등록 위치 | 유형 | 이름 | 값 |
 |---|---|---|---|
 | `sonmap.net` 공개 DNS | CNAME | `dnsResourceRecord.name` | `dnsResourceRecord.data` |
-| 사내 DNS | A | `jupyter-group01.sonmap.net` | 실제 내부 ALB VIP (`172.31.96.2`) |
+| 사내 DNS | A | `sbx.sonmap.net` | 실제 내부 ALB VIP (`172.31.96.2`) |
 
 Google은 공개 CNAME을 발급 및 자동 갱신 검증에 사용합니다. 인증서를 사용하는 동안 CNAME을 유지합니다. 사용자는 사내 DNS에서 내부 ALB IP를 확인해 접속합니다. [리전 Google 관리형 인증서 가이드](https://docs.cloud.google.com/certificate-manager/docs/deploy-google-managed-regional)
 
 ##### 3-32-2-1. 외부 DNS 요청서 · 공개 CNAME 등록
 
-아래 값은 `sonmap.net` PoC에서 발급받은 DNS 승인 값입니다. 운영 도메인은 3-32-4절에서 새로 조회한 값으로 작성합니다.
+아래 값은 이전 도메인(`jupyter-group01.sonmap.net`)에서 발급받은 형식 예시입니다. `sbx.sonmap.net` 은 3-32-2 명령으로 새 승인 값을 조회해 바꿔 씁니다. 운영 도메인은 3-32-4절에서 새로 조회한 값으로 작성합니다.
 
 ```text
 1.작업대상(외부DNS or 내부DNS) :
@@ -2060,7 +2077,7 @@ Google은 공개 CNAME을 발급 및 자동 갱신 검증에 사용합니다. �
 
 2.작업내용
 [등록]
-도메인명 : _acme-challenge_5zozaksz6rlqjhyf.jupyter-group01.sonmap.net
+도메인명 : _acme-challenge_5zozaksz6rlqjhyf.sbx.sonmap.net
 IP 정보 : cce5034d-0b78-4be0-b365-ec97883d176a.2.asia-northeast3.authorize.certificatemanager.goog
 TYPE : CNAME
 
@@ -2085,7 +2102,7 @@ GCP Sandbox JupyterHub 전환으로 SSL 인증서 프로비저닝을 위한 DNS 
 
 2.작업내용
 [등록]
-도메인명 : jupyter-group01.sonmap.net
+도메인명 : sbx.sonmap.net
 IP 정보 : 172.31.96.2
 TYPE : A
 
@@ -2118,12 +2135,12 @@ gcloud certificate-manager certificates describe "${MANAGED_CERT}" \
 
 ##### 3-32-3-1. PoC 수행 기록 및 DNS 완료 후 점검
 
-`cert-jupyter-group01-managed` 생성은 완료됐습니다. 생성 직후 `describe`에서 다음 상태를 확인했습니다.
+`cert-sbx-managed` 생성은 완료됐습니다. 생성 직후 `describe`에서 다음 상태를 확인했습니다.
 
 ```yaml
 managed:
   authorizationAttemptInfo:
-  - domain: jupyter-group01.sonmap.net
+  - domain: sbx.sonmap.net
     state: AUTHORIZING
   state: PROVISIONING
 ```
@@ -2141,7 +2158,7 @@ test -n "${CNAME_NAME}" && dig +short CNAME "${CNAME_NAME}"
 
 ```text
 # 사내 DNS를 사용하는 PC에서 실행하며 운영 전환 시 호스트를 확정값으로 교체
-nslookup jupyter-group01.sonmap.net
+nslookup sbx.sonmap.net
 ```
 
 | 조회 결과 | 다음 작업 |

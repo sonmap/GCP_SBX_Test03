@@ -1,0 +1,71 @@
+{
+  "schema_version": "2.0",
+  "request_id": "REQ-TEST-TASK01-001",
+  "approval": {
+    "status": "APPROVED",
+    "approval_id": "test-approval",
+    "approved_at": "2026-01-01T00:00:00Z"
+  },
+  "action": "CREATE",
+  "task": {
+    "name": "task01",
+    "display_name": "Test task01 (general)",
+    "expires_on": "2026-12-31",
+    "origin": "NEW"
+  },
+  "identity": {
+    "group_email": "pgrp-gcp-dev-task01@sonmap.net",
+    "manage_group": true,
+    "jupyter_gsa": {
+      "email": "sa-sbx-task01-notebook-1-user@gcp-sbx-edp-task01.iam.gserviceaccount.com",
+      "create": true
+    },
+    "members": [
+      "user01@sonmap.net"
+    ]
+  },
+  "project": {
+    "manage": true,
+    "project_id": "gcp-sbx-edp-task01",
+    "create_project": true,
+    "project_name": "Sandbox task01",
+    "billing_account": "000000-000000-000000",
+    "folder_id": "154455658682"
+  },
+  "data": {
+    "manage": true,
+    "bigquery_dataset": "task01_main",
+    "gcs_bucket": "gcp-sbx-edp-task01-data"
+  },
+  "gke": {
+    "project_id": "gcp-sbx-gke01",
+    "cluster_name": "gke-sbx-main-an3",
+    "location": "asia-northeast3"
+  },
+  "workload": {
+    "area": "general",
+    "namespace": "sbx-general-task01",
+    "running": true,
+    "cpu": 8,
+    "memory_gib": 64,
+    "storage": {
+      "size_gb": 100,
+      "zone": "asia-northeast3-a"
+    },
+    "containers": [
+      {
+        "name": "jupyter",
+        "image": "asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/replace-me-jupyter@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "hub_port": 8081,
+        "host": "sbx.sonmap.net",
+        "base_path": "/general/task01/"
+      }
+    ]
+  },
+  "source": {
+    "release_id": "git-000000000000",
+    "archive_uri": "gs://gcp-sbx-gke01-sbxtest01-bundles/platform-releases/git-000000000000/sandbox-source.zip",
+    "generation": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

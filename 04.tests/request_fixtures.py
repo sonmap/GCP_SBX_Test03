@@ -1,7 +1,7 @@
 """Synthetic request data (schema 2.0) for local tests."""
 
 DIGEST = "sha256:" + "ab" * 32
-REGISTRY = "asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform"
+REGISTRY = "asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
 ENV = {
     "SBX_GKE_PROJECT": "gcp-sbx-gke01", "GCP_REGION": "asia-northeast3",
     "GKE_CLUSTER_NAME": "gke-sbx-main-an3",
@@ -17,9 +17,9 @@ ENV = {
     "GROUP_EMAIL_TEMPLATE": "pgrp-gcp-dev-{task}@sonmap.net",
     "MEMBER_EMAIL_DOMAINS": "sonmap.net",
     "NAMESPACE_TEMPLATE": "sbx-{area}-{task}",
-    "ALLOWED_AREAS": "general,anonymous,common,sa",
+    "ALLOWED_AREAS": "general,sa,com",
     "JUPYTER_HOST_SUFFIXES": ".sonmap.net",
-    "IMAGE_REGISTRY_PREFIXES": "asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/",
+    "IMAGE_REGISTRY_PREFIXES": "asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/",
     "DATALAKE_PROJECTS": "pjt-c-admin",
 }
 

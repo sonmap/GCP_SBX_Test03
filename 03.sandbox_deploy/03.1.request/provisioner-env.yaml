@@ -7,7 +7,7 @@ WORKER_POOL: projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-s
 REQUEST_BUCKET: gcp-sbx-gke01-sbxtest01-requests
 BUNDLE_BUCKET: gcp-sbx-gke01-sbxtest01-bundles
 TF_STATE_BUCKET: gcp-sbx-gke01-sbxtest01-tfstate
-RUNNER_IMAGE_REPO: asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner
+RUNNER_IMAGE_REPO: asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/sbxtest01-automation-runner
 TF_MANAGER_SA: tf-manager
 DEPLOYMENT_PREFIX: sbxtest01
 GITHUB_REPOSITORY: sonmap/GCP_SBX_Test03
@@ -19,9 +19,9 @@ CLOUD_IDENTITY_CUSTOMER_ID: __SET_CUSTOMER_ID__
 GROUP_EMAIL_TEMPLATE: "pgrp-gcp-dev-{task}@sonmap.net"
 MEMBER_EMAIL_DOMAINS: sonmap.net
 NAMESPACE_TEMPLATE: "sbx-{area}-{task}"
-ALLOWED_AREAS: general,anonymous,common,sa
+ALLOWED_AREAS: general,sa,com
 JUPYTER_HOST_SUFFIXES: .sonmap.net
-IMAGE_REGISTRY_PREFIXES: asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/
+IMAGE_REGISTRY_PREFIXES: asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/
 DATALAKE_PROJECTS: pjt-c-admin
 MAX_MEMORY_PER_CPU: "8"
 # --- JupyterHub 설정 템플릿에 들어가는 값 (hub_config=MANAGED 일 때만 사용) -----

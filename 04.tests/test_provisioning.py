@@ -29,6 +29,23 @@ class RequestRuleTests(unittest.TestCase):
             self.assertEqual(schema_errors(request), [])
             p.validate_semantics(request)
 
+    def test_three_areas_share_one_host(self):
+        for task, area in [('task01', 'general'), ('task11', 'sa'), ('task21', 'com')]:
+            request = make_request()
+            request['task']['name'] = task
+            request['identity']['group_email'] = f'pgrp-gcp-dev-{task}@sonmap.net'
+            project = f'gcp-sbx-edp-{task}'
+            request['project']['project_id'] = project
+            request['identity']['jupyter_gsa']['email'] = f'sa-sbx-{task}-notebook-1-user@{project}.iam.gserviceaccount.com'
+            request['workload'].update(area=area, namespace=f'sbx-{area}-{task}')
+            request['workload']['containers'][0]['base_path'] = f'/{area}/{task}/'
+            self.assertEqual(schema_errors(request), [])
+            p.validate_semantics(request)
+        request = make_request()
+        request['workload'].update(area='common', namespace='sbx-common-sbx03')
+        with self.assertRaisesRegex(ValueError, 'workload.area'):
+            p.validate_semantics(request)
+
     def test_stages_follow_what_the_request_manages(self):
         self.assertEqual(p.enabled_stages(make_request()), ['05-group', '10-project', '30-project-iam', '40-data'])
         # A migrated task already has its group, project and data.
@@ -42,6 +59,7 @@ class RequestRuleTests(unittest.TestCase):
     def test_environment_policy(self):
         cases = {
             'workload.area': lambda r: r['workload'].update(area='mvno', namespace='sbx-mvno-rsch'),
+            'image registry': lambda r: r['workload']['containers'][0].update(image='asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/x/y@sha256:' + 'ab' * 32),
             'workload.namespace': lambda r: r['workload'].update(namespace='other'),
             'image registry': lambda r: r['workload']['containers'][0].update(image='docker.io/x/y@' + 'sha256:' + 'ab' * 32),
             'approved Jupyter domain': lambda r: r['workload']['containers'][0].update(host='sbx.example.com'),

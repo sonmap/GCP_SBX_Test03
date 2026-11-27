@@ -62,7 +62,7 @@
     "containers": [
       {
         "name": "jupyter",
-        "image": "asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/sbx03-jupyter@sha256:abababababababababababababababababababababababababababababababab",
+        "image": "asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/sbx03-jupyter@sha256:abababababababababababababababababababababababababababababababab",
         "hub_port": 8081,
         "host": "sbx.sonmap.net",
         "base_path": "/general/sbx03/"

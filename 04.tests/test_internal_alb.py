@@ -31,6 +31,14 @@ class UrlMapRouteTests(unittest.TestCase):
         self.assertEqual(matcher["pathRules"][0]["paths"], ["/general/rsch", "/general/rsch/*"])
         self.assertEqual(len(matcher["pathRules"]), 2)
 
+    def test_three_areas_on_one_host(self):
+        config = {"defaultService": DEFAULT}
+        for area, task in [("general", "task01"), ("sa", "task11"), ("com", "task21")]:
+            self.assertTrue(module.merge_route(config, "sbx.sonmap.net", f"/{area}/{task}/", uri(f"bes-sbx-{task}-jupyter")))
+        self.assertEqual(len(config["hostRules"]), 1)
+        paths = [rule["paths"][1] for rule in config["pathMatchers"][0]["pathRules"]]
+        self.assertEqual(paths, ["/general/task01/*", "/sa/task11/*", "/com/task21/*"])
+
     def test_rerun_changes_nothing(self):
         config = {"defaultService": DEFAULT}
         module.merge_route(config, "sbx.sonmap.net", "/general/rsch/", uri("bes-rsch"))
