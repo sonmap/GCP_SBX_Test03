@@ -37,6 +37,33 @@
 <details>
 <summary>내용 펼치기 / 접기</summary>
 
+### 0-0. 시작 전 — 프로젝트와 작업 그룹 권한
+
+0-1 의 프로젝트 번호 조회부터 `user01@sonmap.net` 권한이 필요합니다. 그래서 **0-1 보다 먼저** 관리자 계정으로 두 가지를 확인합니다.
+
+```bash
+# 실행 위치 infra-son01 | 계정 admin@sonmap.net (프로젝트 생성 · IAM 관리자)
+gcloud auth login admin@sonmap.net
+
+# 1) 프로젝트가 있는지. 없으면 만들고 결제 계정을 연결합니다.
+gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectId,lifecycleState)' \
+  || { gcloud projects create gcp-sbx-gke01 --folder=154455658682 --account=admin@sonmap.net \
+       && gcloud billing projects link gcp-sbx-gke01 --billing-account="<결제 계정 ID>" --account=admin@sonmap.net; }
+
+# 2) 작업 그룹 권한 (1-0절과 같은 스크립트)
+export SBX_GKE_PROJECT=gcp-sbx-gke01
+export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
+export IAM_ADMIN_ACCOUNT=admin@sonmap.net
+./02.infra-setup/grant-operator-group.sh            # 계획 확인
+./02.infra-setup/grant-operator-group.sh --apply    # 부여
+
+# 3) user01 로 확인 (그룹 권한 반영에 몇 분 걸릴 수 있음)
+gcloud auth login user01@sonmap.net
+gcloud projects describe gcp-sbx-gke01 --account=user01@sonmap.net --format='value(projectNumber)'
+```
+
+3) 에서 숫자가 나오면 0-1 로 진행합니다.
+
 <a name="프로젝트-기준과-변수명"></a>
 
 ### 0-1. 프로젝트 기준과 변수명
@@ -163,6 +190,8 @@ export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe "${SBX_GKE_PROJECT}" -
 <a name="1-필요한-api-활성화--cicd--shared-vpc-host--gke-프로젝트"></a>
 
 ### 1-0. 작업 그룹 권한 — pgrp-gcp-sbx01
+
+> 0-0 에서 이미 실행했다면 건너뜁니다. 아래는 같은 내용의 상세 설명입니다.
 
 작업자 `user01@sonmap.net` 은 개인이 아니라 **그룹 `pgrp-gcp-sbx01@sonmap.net`** 으로 권한을 받습니다. 역할은 운영 환경 l2comn 관리 그룹과 같은 목록이며 [grant-operator-group.sh](grant-operator-group.sh) 에 이름으로 적혀 있습니다. 스크립트가 이름으로 역할 ID 를 찾고, 찾지 못한 역할은 부여하지 않고 표시합니다.
 
