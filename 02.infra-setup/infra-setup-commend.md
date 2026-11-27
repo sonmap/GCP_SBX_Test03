@@ -1258,6 +1258,86 @@ gcloud services vpc-peerings connect --project="$HOST" --network="$NETWORK" \
   --service=servicenetworking.googleapis.com --ranges="$PSA_NAME" --account="$VPC_ADMIN_ACCOUNT"
 ```
 
+##### 2-3-9-1. (선택) 기존 PSA 삭제 후 다시 구성
+
+이전 테스트의 PSA 를 지우고 새로 만들 때만 실행합니다. **순서를 지켜야 합니다.** 피어링이 예약 범위를 쓰고 있으면 예약이 지워지지 않고, 피어링 안에 Private Pool 같은 사용 자원이 남아 있으면 피어링이 지워지지 않습니다.
+
+```mermaid
+flowchart LR
+    A["① 사용 자원 확인<br/>Private Pool · 피어링 경로"] --> B["② 피어링 삭제"]
+    B --> C["③ 예약 범위 삭제"]
+    C --> D["④ 예약 범위 생성"]
+    D --> E["⑤ 피어링 연결"]
+    E --> F["⑥ 확인"]
+```
+
+**① 사용 자원 확인** · 두 결과가 모두 비어 있어야 다음으로 갑니다.
+
+```bash
+# 실행 위치: Cloud Shell (관리자 창) | 대상: gcp-prod-edp-hub-vpchost (조회) | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
+export HOST="gcp-prod-edp-hub-vpchost"
+export NETWORK="vpc-prod-edp-hub"
+export REGION="asia-northeast3"
+export VPC_ADMIN_ACCOUNT="admin@sonmap.net"
+
+# 이 VPC 에 피어링된 Private Pool (예전 · 새 프로젝트 모두) → "Listed 0 items" 이어야 함
+for p in gcp-sbx-edp-gke01 gcp-sbx-gke01; do
+  echo "== $p"
+  gcloud builds worker-pools list --project="$p" --region="$REGION" --account="$VPC_ADMIN_ACCOUNT" \
+    --format='table(name.basename(),state,privatePoolV1Config.networkConfig.peeredNetwork)' 2>&1 | tail -n +1
+done
+
+# 피어링으로 들어오는 경로 (Pool · Cloud SQL 등 사용 자원이 있으면 10.250.0.0/24 안의 경로가 보임) → 비어 있어야 함
+gcloud compute networks peerings list-routes servicenetworking-googleapis-com \
+  --network="$NETWORK" --region="$REGION" --direction=INCOMING \
+  --project="$HOST" --account="$VPC_ADMIN_ACCOUNT"
+```
+
+**② ~ ③ 삭제**
+
+```bash
+# 실행 위치: Cloud Shell (관리자 창) | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
+export HOST="gcp-prod-edp-hub-vpchost"
+export NETWORK="vpc-prod-edp-hub"
+export VPC_ADMIN_ACCOUNT="admin@sonmap.net"
+export PSA_NAME="psa-prod-edp-cloudbuild"
+
+# ② Service Networking 피어링 삭제 (이 VPC 의 피어링 범위가 psa-prod-edp-cloudbuild 하나일 때)
+gcloud services vpc-peerings delete --service=servicenetworking.googleapis.com \
+  --network="$NETWORK" --project="$HOST" --account="$VPC_ADMIN_ACCOUNT"
+
+# ③ 예약 범위 삭제
+gcloud compute addresses delete "$PSA_NAME" --global --project="$HOST" --account="$VPC_ADMIN_ACCOUNT"
+```
+
+- ② 에서 `Producer services ... still using this peering` 가 나오면 ① 에서 못 찾은 사용 자원이 있는 것입니다. 멈추고 그 자원부터 정리합니다.
+- 이 예약은 다른 Terraform 이 만든 자원입니다(라벨 `goog-terraform-provisioned: true`). 손으로 지우면 그 Terraform State 와 어긋나므로, 그 코드를 더 쓰지 않을 때만 지웁니다.
+
+**④ ~ ⑥ 다시 구성** · 위 2-3-9 블록의 생성 명령과 같습니다.
+
+```bash
+# 실행 위치: Cloud Shell (관리자 창) | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
+export HOST="gcp-prod-edp-hub-vpchost"
+export NETWORK="vpc-prod-edp-hub"
+export VPC_ADMIN_ACCOUNT="admin@sonmap.net"
+export PSA_NAME="psa-prod-edp-cloudbuild"
+
+# ④ 예약 범위 생성
+gcloud compute addresses create "$PSA_NAME" --global --project="$HOST" \
+  --purpose=VPC_PEERING --addresses=10.250.0.0 --prefix-length=24 \
+  --network="$NETWORK" --account="$VPC_ADMIN_ACCOUNT"
+
+# ⑤ 피어링 연결 (몇 분 걸림)
+gcloud services vpc-peerings connect --service=servicenetworking.googleapis.com \
+  --ranges="$PSA_NAME" --network="$NETWORK" --project="$HOST" --account="$VPC_ADMIN_ACCOUNT"
+
+# ⑥ 확인 → RESERVED, 피어링 목록에 psa-prod-edp-cloudbuild
+gcloud compute addresses describe "$PSA_NAME" --global --project="$HOST" \
+  --account="$VPC_ADMIN_ACCOUNT" --format='value(address,prefixLength,status)'
+gcloud services vpc-peerings list --network="$NETWORK" --project="$HOST" \
+  --account="$VPC_ADMIN_ACCOUNT" --format='table(service,peering,reservedPeeringRanges)'
+```
+
 <a name="9-gke-노드용-private-google-access와-restricted-vip"></a>
 
 #### 2-3-10. GKE 노드용 Private Google Access와 Restricted VIP
