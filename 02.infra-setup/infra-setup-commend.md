@@ -1186,7 +1186,7 @@ gcloud compute routes create rt-prod-edp-restricted-googleapis \
 
 ###### 2-3-10-7-4. Private DNS 존과 레코드
 
-`gcr.io`는 GKE 시스템 이미지, `pkg.dev`는 내부 AR(Helm 차트·Notebook 이미지), `googleapis.com`은 나머지 API 경로입니다. 셋 중 하나라도 빠지면 배포 중 다른 지점에서 같은 타임아웃이 납니다.
+`gcr.io`는 GKE 시스템 이미지, `pkg.dev`는 AR(edge 프로젝트의 Runner · Provisioner · 과제 Jupyter 이미지), `googleapis.com`은 나머지 API 경로입니다. 셋 중 하나라도 빠지면 배포 중 다른 지점에서 같은 타임아웃이 납니다.
 
 ```bash
 export PGA_IPS="199.36.153.4,199.36.153.5,199.36.153.6,199.36.153.7"
@@ -1656,7 +1656,7 @@ gcloud secrets add-iam-policy-binding jupyter-oauth-client-secret --project="${S
 
 ### 3-17. Shared VPC 운영팀 작업 · Private Pool 초기 구성
 
-`sbx03` 자동 배포에 사용할 `pool-sbxtest01`을 준비합니다. **2-3-9절**에서 `psa-prod-edp-cloudbuild`의 `10.250.0.0/24` 예약과 Service Networking 피어링이 확인됐다면 아래 조회부터 진행합니다.
+과제 자동화(Infrastructure Manager 와 ALB 단계)에 사용할 `pool-sbxtest01`을 준비합니다. **2-3-9절**에서 `psa-prod-edp-cloudbuild`의 `10.250.0.0/24` 예약과 Service Networking 피어링이 확인됐다면 아래 조회부터 진행합니다.
 
 <a name="17-1-기존-pool-조회"></a>
 
@@ -1731,9 +1731,9 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
 
 #### 3-19-1. 수동 작업 · infra-son01에서 이미지 빌드
 
-**1. 준비물** · Helm 차트는 쓰지 않습니다. Runner 이미지를 빌드할 때 Terraform 과 Provider 를 내려받으므로, 빌드하는 곳에서 `releases.hashicorp.com` 과 `registry.terraform.io` 에 닿아야 합니다.
+**1. 준비물** · Helm 차트는 쓰지 않습니다. Runner 이미지는 gcloud · kubectl · Python 만 담습니다. Terraform 은 Infrastructure Manager 가 실행합니다(4-1절).
 
-**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test03 저장소 루트에서 실행합니다. Docker가 설치되어 있고, `user01@sonmap.net`에 AR 업로드 권한이 있어야 합니다.
+**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test03 저장소 루트에서 실행합니다. Docker가 설치되어 있고, `user01@sonmap.net`(또는 가장하는 `tf-manager`)에 edge 프로젝트 AR 업로드 권한(3-11절)이 있어야 합니다.
 
 ```bash
 # 수행 위치: infra-son01, Test03 저장소 루트 | 수행 계정: user01@sonmap.net (AR 인증)
