@@ -14,6 +14,8 @@
 | 작업 그룹 | `OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net` · 작업자 `user01@sonmap.net` 은 이 그룹 구성원 |
 | 서비스 계정 | `TF_MANAGER=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com`, `SBX_MANAGER=sbx-manager@gcp-sbx-gke01.iam.gserviceaccount.com` |
 
+**Cloud Shell 은 admin 으로 열립니다.** 실행 계정이 `user01` 인 블록은 `infra-son01` 에서, `admin` 인 블록은 Cloud Shell 또는 `infra-son01` 에서 실행합니다. 프로젝트 번호(`402269387486`)는 바뀌지 않으므로 블록에 값으로 적었습니다.
+
 **모든 명령 블록은 혼자서 실행됩니다.** 첫 줄에 `# 실행 위치 | 대상 | 실행 계정 | 가장` 이 있고, 바로 아래에 그 블록이 쓰는 변수를 `export` 로 선언합니다. 앞 절의 변수가 남아 있지 않아도, 새 터미널이나 Cloud Shell 에서도 블록 하나만 붙여 넣으면 됩니다. 값을 바꿔야 하면 그 블록의 `export` 줄을 고칩니다.
 
  실행 위치는 터미널(`infra-son01` · Cloud Shell), 대상은 명령이 바꾸는 프로젝트나 자원, 실행 계정은 `gcloud` 가 쓰는 로그인 계정입니다. `가장`은 `--impersonate-service-account`로 API를 호출하는 계정이고, `워크로드 실행`은 `--service-account`로 지정하는 Build·Cloud Run·Workflows 실행 계정입니다. `--member`에 적힌 계정은 IAM 권한을 받는 주체입니다.
@@ -160,7 +162,7 @@ export SBX_MANAGER="sbx-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 export PSA_ADDRESS="10.250.0.0"
 export PSA_PREFIX_LENGTH="24"
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe "${SBX_GKE_PROJECT}" --account="${ADMIN_ACCOUNT}" --format='value(projectNumber)')"
+export SBX_GKE_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 ```
 
 <a name="조회-결과-확인"></a>
@@ -226,7 +228,7 @@ export BILLING_ACCOUNT=""
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 export SBX_MANAGER="sbx-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe "${SBX_GKE_PROJECT}" --account="${ADMIN_ACCOUNT}" --format='value(projectNumber)')"
+export SBX_GKE_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 # 프로젝트 번호는 자동 조회합니다. 조회 실패 또는 숫자가 아닌 결과이면 이후 명령을 중단합니다.
 
 ```
@@ -300,7 +302,7 @@ gcloud services enable container.googleapis.com compute.googleapis.com iam.googl
 # 실행 위치: Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: admin@sonmap.net
 gcloud config set account admin@sonmap.net
 gcloud config set project gcp-sbx-gke01
-PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')"
+PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 echo "project number: ${PROJECT_NUMBER}"        # 숫자가 나와야 합니다
 
 for svc in cloudbuild servicenetworking config run workflows container; do
@@ -518,7 +520,7 @@ export ADMIN_ACCOUNT="user01@sonmap.net"
 export OPERATOR_MEMBER="group:pgrp-gcp-sbx01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export SBX_MANAGER="sbx-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=user01@sonmap.net --format='value(projectNumber)')"
+export SBX_GKE_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \
   --member="${OPERATOR_MEMBER}" --role=roles/iam.serviceAccountTokenCreator --condition=None \
   --account="${ADMIN_ACCOUNT}"
@@ -645,7 +647,7 @@ gcloud resource-manager folders add-iam-policy-binding "${FOLDER_ID}" \
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=user01@sonmap.net --format='value(projectNumber)')"
+export SBX_GKE_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 gcloud projects add-iam-policy-binding "${SBX_GKE_PROJECT}" \
   --member="serviceAccount:${SBX_GKE_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role=roles/container.defaultNodeServiceAccount --condition=None --account="${ADMIN_ACCOUNT}"
@@ -820,8 +822,7 @@ export VPC_ADMIN_ACCOUNT="admin@sonmap.net"
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 
 # 프로젝트 번호 조회 대상: gcp-sbx-gke01
-SBX_PROJECT_NUMBER="$(gcloud projects describe "$SBX_GKE_PROJECT" \
-  --account="$VPC_ADMIN_ACCOUNT" --format='value(projectNumber)')"
+SBX_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 export SBX_PROJECT_NUMBER
 echo "$SBX_PROJECT_NUMBER"
 export HOST="gcp-prod-edp-hub-vpchost"
@@ -1101,7 +1102,7 @@ gcloud compute firewall-rules create fw-sbxtest01-ilb-proxy \
 
 ```bash
 # 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
-export SBX_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectNumber)')"
+export SBX_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 # 실행 예시: export SBX_PROJECT_NUMBER="프로젝트팀에서 확인한 숫자 번호"
 export GKE_AGENT="service-${SBX_PROJECT_NUMBER}@container-engine-robot.iam.gserviceaccount.com"
 export GOOGLE_APIS_AGENT="${SBX_PROJECT_NUMBER}@cloudservices.gserviceaccount.com"
@@ -1136,8 +1137,7 @@ gcloud compute networks subnets add-iam-policy-binding "$MAIN_SUBNET" \
 ```bash
 # 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net
 # 프로젝트 번호 조회 대상: gcp-sbx-gke01 | IAM 적용 대상: gcp-prod-edp-hub-vpchost
-export SBX_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 \
-  --account=admin@sonmap.net --format='value(projectNumber)')"
+export SBX_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 echo "$SBX_PROJECT_NUMBER"
 ```
 
@@ -1145,7 +1145,7 @@ echo "$SBX_PROJECT_NUMBER"
 
 ```bash
 # 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net
-export SBX_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectNumber)')"
+export SBX_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 gcloud compute networks subnets add-iam-policy-binding subnet-prod-sbx-gke-01 \
   --project=gcp-prod-edp-hub-vpchost --region=asia-northeast3 --account=admin@sonmap.net \
   --member="serviceAccount:service-${SBX_PROJECT_NUMBER}@container-engine-robot.iam.gserviceaccount.com" \
@@ -1162,7 +1162,7 @@ export REGION="asia-northeast3"
 export HOST="gcp-prod-edp-hub-vpchost"
 export VPC_ADMIN_ACCOUNT="admin@sonmap.net"
 export MAIN_SUBNET="subnet-prod-sbx-gke-01"
-export SBX_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectNumber)')"
+export SBX_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 export GOOGLE_APIS_AGENT="${SBX_PROJECT_NUMBER}@cloudservices.gserviceaccount.com"
 gcloud compute networks subnets add-iam-policy-binding "$MAIN_SUBNET" \
   --project="$HOST" --region="$REGION" --account="$VPC_ADMIN_ACCOUNT" \
@@ -1193,7 +1193,7 @@ gcloud compute networks subnets add-iam-policy-binding "$VIP_SUBNET" \
 # 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
 export HOST="gcp-prod-edp-hub-vpchost"
 export VPC_ADMIN_ACCOUNT="admin@sonmap.net"
-export SBX_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectNumber)')"
+export SBX_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 export GKE_AGENT="service-${SBX_PROJECT_NUMBER}@container-engine-robot.iam.gserviceaccount.com"
 gcloud projects add-iam-policy-binding "$HOST" --account="$VPC_ADMIN_ACCOUNT" \
   --member="serviceAccount:$GKE_AGENT" --role=roles/container.hostServiceAgentUser --condition=None
@@ -1764,7 +1764,7 @@ flowchart TD
 `gcp-sbx-gke01` 관리자는 1절의 프로젝트 API 활성화와 서비스 에이전트 준비를 수행합니다. 운영팀에 요청하기 전에 아래 명령으로 서비스 프로젝트 번호와 연결된 호스트를 확인합니다.
 
 ```bash
-# 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+# 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
@@ -1782,7 +1782,7 @@ gcloud iam service-accounts describe "$TF_MANAGER" \
 운영팀 회신 후 아래 명령을 배포 주체인 `tf-manager`로 실행해 서비스 프로젝트에 사용 가능한 서브넷을 확인합니다. 실행 계정에는 1절에 따라 `tf-manager` 가장 권한이 필요합니다.
 
 ```bash
-# 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: user01@sonmap.net
+# 실행 위치: infra-son01 | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: user01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
@@ -1882,7 +1882,7 @@ export ADMIN_CIDR=172.31.10.0/24
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 export SBX_MANAGER="sbx-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe "${SBX_GKE_PROJECT}" --account="${ADMIN_ACCOUNT}" --format='value(projectNumber)')"
+export SBX_GKE_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 # 프로젝트 번호는 자동 조회합니다. 조회 실패 또는 숫자가 아닌 결과이면 이후 명령을 중단합니다.
 
 # 2절의 네트워크·서브넷 IAM 확인 후 저장소 루트에서 실행합니다.
@@ -2058,7 +2058,7 @@ gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=user01@sonmap.net --format='value(projectNumber)')"
+export SBX_GKE_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01-bundles" \
   --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@gcp-sa-config.iam.gserviceaccount.com" \
   --role=roles/storage.objectViewer --account="${ADMIN_ACCOUNT}" \
@@ -2172,7 +2172,7 @@ export REGION="asia-northeast3"
 export AR_ADMIN_ACCOUNT="admin@sonmap.net"
 export AR_PROJECT="gcp-prod-edp-edge-509423"
 export AR_REPOSITORY="ar-sbxtest01-platform"
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectNumber)')"
+export SBX_GKE_PROJECT_NUMBER="402269387486"   # gcp-sbx-gke01 프로젝트 번호 (바뀌지 않음. 확인: gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')
 echo "SBX_GKE_PROJECT_NUMBER=${SBX_GKE_PROJECT_NUMBER}"   # 402269387486
 if [[ "${SBX_GKE_PROJECT_NUMBER}" =~ ^[0-9]+$ ]]; then
   for member in \
