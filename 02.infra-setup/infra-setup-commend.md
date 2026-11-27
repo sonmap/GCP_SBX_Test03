@@ -34,7 +34,7 @@
 | 8 | 1-5 ~ 1-7 | `sbx-manager` · `tf-manager` 나머지 권한 | `infra-son01` | user01 (1-6 은 admin) |
 | 9 | 1-8 | 가장 권한 + **확인 3가지** (가장 · 그룹 조회 · 고객 ID) | `infra-son01` | user01 |
 | 10 | 1-9 ~ 1-12 | 폴더 권한, GKE 노드 계정, (선택) 결제 | `infra-son01` | admin · user01 |
-| 11 | 2장 | 서브넷 · 방화벽 · 서브넷 IAM · PSA · Private Google Access | `infra-son01` | admin (호스트 프로젝트) |
+| 11 | 2장 | **2-3-0 Shared VPC 연결** → 서브넷 · 방화벽 · 서브넷 IAM · PSA · Private Google Access | `infra-son01` | admin (호스트 프로젝트) |
 | 12 | 3-1 ~ 3-9 | 버킷 3개와 권한 | `infra-son01` | user01 → `tf-manager` 가장 |
 | 13 | 3-10 ~ 3-12 | edge AR 확인, AR 권한 | Cloud Shell | edge 프로젝트 관리자 |
 | 14 | 3-13 ~ 3-16 | OAuth Secret — **테스트 중 건너뜀** | | |
@@ -843,6 +843,42 @@ gcloud compute networks subnets list --project="$HOST" --account="$VPC_ADMIN_ACC
   --format='table(name,ipCidrRange,purpose,role,secondaryIpRanges)'
 ```
 
+<a name="2-3-0-서비스-프로젝트-shared-vpc-연결"></a>
+
+#### 2-3-0. 서비스 프로젝트 Shared VPC 연결
+
+`gcp-sbx-gke01` 을 호스트 `gcp-prod-edp-hub-vpchost` 의 서비스 프로젝트로 연결합니다. **연결이 없으면** 뒤의 서브넷 IAM 을 모두 줘도 GKE 가 호스트 서브넷을 쓰지 못하고, 2-4 의 `list-usable` 이 `HTTPError 400 ... not associated` 로 실패합니다. 조직 수준 `roles/compute.xpnAdmin` 이 필요합니다.
+
+```mermaid
+flowchart LR
+    H["호스트 프로젝트<br/>gcp-prod-edp-hub-vpchost<br/>VPC vpc-prod-edp-hub"]
+    S1["서비스 프로젝트<br/>gcp-sbx-gke01 (지금)"]
+    S0["gcp-sbx-edp-gke01 (예전)"]
+    H -->|"① 연결 (이 절)"| S1
+    H -. 이전 테스트에서 연결 .-> S0
+    S1 -->|"② 서브넷 IAM (2-3-8)"| SUB["서브넷 사용<br/>GKE · ALB VIP"]
+```
+
+```bash
+# 실행 위치: Cloud Shell (관리자 창) | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
+export HOST="gcp-prod-edp-hub-vpchost"
+export VPC_ADMIN_ACCOUNT="admin@sonmap.net"
+
+# 1) 지금 연결된 서비스 프로젝트 → gcp-sbx-gke01 이 있으면 2) 는 건너뜀
+gcloud compute shared-vpc list-associated-resources "$HOST" --account="$VPC_ADMIN_ACCOUNT"
+
+# 2) 연결
+gcloud compute shared-vpc associated-projects add gcp-sbx-gke01 \
+  --host-project="$HOST" --account="$VPC_ADMIN_ACCOUNT"
+
+# 3) 확인 → gcp-prod-edp-hub-vpchost 가 나오면 성공
+gcloud compute shared-vpc get-host-project gcp-sbx-gke01 \
+  --account="$VPC_ADMIN_ACCOUNT" --format='value(name)'
+```
+
+- 2) 에서 `PERMISSION_DENIED` 면 `admin@sonmap.net` 에 조직의 `roles/compute.xpnAdmin` 이 없는 것입니다.
+- 예전 `gcp-sbx-edp-gke01` 의 연결은 그대로 두어도 지금 작업과 충돌하지 않습니다. 정리하려면 `gcloud compute shared-vpc associated-projects remove gcp-sbx-edp-gke01 --host-project="$HOST"` (그 프로젝트가 호스트 서브넷을 쓰는 자원이 없을 때만 됨).
+
 <a name="gke-서브넷-생성에-필요한-값"></a>
 
 #### 2-3-1. GKE 서브넷 생성에 필요한 값
@@ -1338,6 +1374,36 @@ gcloud services vpc-peerings list --network="$NETWORK" --project="$HOST" \
   --account="$VPC_ADMIN_ACCOUNT" --format='table(service,peering,reservedPeeringRanges)'
 ```
 
+**PSA 와 피어링 구조** · 무엇을 지우고 다시 만드는지 한눈에 봅니다.
+
+```mermaid
+flowchart LR
+    subgraph HOST["호스트 VPC · vpc-prod-edp-hub (gcp-prod-edp-hub-vpchost)"]
+      RNG["예약 범위 (PSA)<br/>psa-prod-edp-cloudbuild<br/>10.250.0.0/24 · purpose VPC_PEERING"]
+      GKE["GKE 노드 서브넷 · 컨트롤 플레인<br/>10.252.0.0/24 · 10.253.3.0/28"]
+    end
+
+    subgraph GOOG["Google 관리 VPC (Service Networking)"]
+      POOL["Cloud Build Private Pool 작업자<br/>pool-sbxtest01 (gcp-sbx-gke01)<br/>IP 는 10.250.0.0/24 에서 받음"]
+    end
+
+    RNG -. "② 피어링이 이 범위를 Google 쪽에 넘김" .- PEER{{"Service Networking 피어링<br/>servicenetworking-googleapis-com"}}
+    PEER --- POOL
+    POOL ==>|"③ 사설 IP 로 접속"| GKE
+
+    classDef del fill:#ffebee,stroke:#c62828
+    class RNG,PEER del
+```
+
+| 구성 요소 | 무엇인가 | 삭제 순서 | 생성 순서 |
+|---|---|---|---|
+| 예약 범위 `psa-prod-edp-cloudbuild` | 호스트 VPC 안에서 "Google 관리 서비스용" 으로 비워 둔 대역. 이 VPC 의 다른 서브넷과 겹치면 안 됨 | ③ | ④ |
+| Service Networking 피어링 | 호스트 VPC 와 Google 관리 VPC 를 잇는 연결. 예약 범위를 Google 쪽에 넘김. VPC 당 하나이고, Cloud SQL · Memorystore 등도 같은 피어링을 씀 | ② | ⑤ |
+| Private Pool | Google 관리 VPC 안의 빌드 작업자. 예약 범위에서 IP 를 받아 피어링을 거쳐 GKE 등에 사설 IP 로 접근 | 먼저 정리 (①) | 3-17 |
+
+- 피어링이 범위를 쓰는 동안에는 범위를 지울 수 없고, Pool 같은 사용 자원이 남아 있으면 피어링을 지울 수 없습니다. 그래서 **사용 자원 → 피어링 → 범위** 순으로 지우고, 반대 순서로 만듭니다.
+- 피어링은 VPC 전체가 공유합니다. 다른 관리형 서비스가 같은 피어링에 있으면 ② 에서 함께 끊기므로 ① 의 경로 확인이 비어 있을 때만 진행합니다.
+
 <a name="9-gke-노드용-private-google-access와-restricted-vip"></a>
 
 #### 2-3-10. GKE 노드용 Private Google Access와 Restricted VIP
@@ -1478,18 +1544,17 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://bigquery.googleapis.com/
 
 DNS 응답이 모두 `199.36.153.4` ~ `199.36.153.7` 범위여야 합니다. 범위를 벗어나면 private zone의 레코드가 restricted VIP가 아닌 대상을 가리키는 것이므로 2-3-10-5를 먼저 바로잡습니다. `curl`은 인증 없이 호출하므로 `401` 또는 `403` 응답이면 경로까지 정상입니다. 응답 없이 멈추면 송신 방화벽 규칙과 라우트를 확인합니다.
 
-**사후 확인 (GKE 생성 이후)** · 클러스터가 아직 없으면 이 블록은 건너뛰고 클러스터 생성 후에 수행합니다. 관리 VM DNS 확인은 노드의 통신 성공까지 보장하지 않으므로, 여전히 타임아웃이 발생하면 GKE 노드의 이그레스 정책과 유효 경로를 확인합니다.
+**사후 확인 (GKE 생성 이후)** · 클러스터가 아직 없으면 이 블록은 건너뛰고 3-18 클러스터 생성 후에 수행합니다. 관리 VM DNS 확인은 노드의 통신 성공까지 보장하지 않으므로, 여전히 타임아웃이 발생하면 GKE 노드의 이그레스 정책과 유효 경로를 확인합니다.
 
 ```bash
-# 실행 위치: infra-son01 | 대상: GKE | 실행 계정: user01@sonmap.net
-export CLOUDSDK_CORE_ACCOUNT="user01@sonmap.net"
+# 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net
+export REGION="asia-northeast3"
 export KUBECONFIG="$HOME/.kube/config-sbx-dns"
-
-gcloud container clusters get-credentials <클러스터명> \
-  --region="$REGION" --project=gcp-sbx-gke01
+gcloud container clusters get-credentials gke-sbx-main-an3 \
+  --region="$REGION" --project=gcp-sbx-gke01 --account=user01@sonmap.net --dns-endpoint
 
 kubectl get nodes
-kubectl -n sbx03-smoke get pods -o wide
+kubectl get pods -A -o wide | grep -v Running   # 이미지 받기 실패(ImagePullBackOff) 가 없어야 함
 ```
 
 <a name="0-private-google-access와-private-dns-선행-필수"></a>
@@ -1730,85 +1795,17 @@ gcloud compute networks subnets list-usable --project=gcp-prod-edp-hub-vpchost \
 
 응답에서 운영팀이 회신한 GKE·ALB VIP 서브넷과 GKE Pod 보조 범위를 확인합니다. 서브넷 사용 목록과 운영팀 IAM 적용 결과가 확인되면 3절의 서비스 프로젝트 구축 명령을 실행합니다.
 
-<a name="2-4-1-서비스-프로젝트-shared-vpc-연결"></a>
+<a name="2-4-1-list-usable-오류"></a>
 
-#### 2-4-1. 서비스 프로젝트 Shared VPC 연결
+#### 2-4-1. `list-usable` 이 실패할 때
 
-위 `list-usable` 이 아래와 같이 실패하면 서비스 프로젝트가 호스트 프로젝트에 연결되어 있지 않은 것입니다. 권한 부여 여부와 무관하게 실패하므로 이 절을 먼저 완료합니다.
+| 결과 | 원인 | 조치 |
+|---|---|---|
+| `HTTPError 400: Project gcp-sbx-gke01 does not exist or ... is not associated with gcp-prod-edp-hub-vpchost in Shared VPC` | 서비스 프로젝트가 호스트에 연결되지 않음 (또는 프로젝트 ID 오타) | [2-3-0](#2-3-0-서비스-프로젝트-shared-vpc-연결) |
+| `[]` (빈 목록) | 연결은 됐지만 서브넷 IAM 이 없거나 반영 전 | [2-3-8](#2-3-8-서브넷-및-호스트-iam-적용) 실행 후 1 ~ 2분 뒤 재조회 |
+| `getAccessToken denied` | `user01` 의 `tf-manager` 가장 권한 없음 | 1-8 |
 
-```text
-ERROR: (gcloud.compute.networks.subnets.list-usable) HTTPError 400:
-Project gcp-sbx-gke01 does not exist or project gcp-sbx-gke01
-is not associated with gcp-prod-edp-hub-vpchost in Shared VPC
-```
-
-이 오류는 프로젝트 미존재와 Shared VPC 미연결을 구분하지 않습니다. 호스트 프로젝트에는 `gcp-sbx-gke01` 과 `gcp-sbx-edp-gke01` 처럼 한 토막만 다른 ID가 함께 연결될 수 있으므로, 프로젝트 ID 오타 여부를 먼저 확인합니다.
-
-```bash
-# 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
-gcloud projects describe gcp-sbx-gke01 --account="$ADMIN_ACCOUNT"
-```
-
-```bash
-# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
-gcloud compute shared-vpc list-associated-resources gcp-prod-edp-hub-vpchost \
-  --account="admin@sonmap.net"
-```
-
-**연결** · 조직 수준의 `roles/compute.xpnAdmin` 권한이 필요하며, 호스트 프로젝트 관리자 계정으로 수행합니다.
-
-```bash
-# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
-gcloud compute shared-vpc associated-projects add gcp-sbx-gke01 \
-  --host-project=gcp-prod-edp-hub-vpchost \
-  --account="admin@sonmap.net"
-
-gcloud compute shared-vpc get-host-project gcp-sbx-gke01 \
-  --account="admin@sonmap.net"
-```
-
-**서브넷 사용 권한 부여** · 연결만으로는 `list-usable` 이 빈 배열을 반환합니다. 서브넷 단위로 `roles/compute.networkUser` 를 부여해야 조회와 사용이 가능합니다.
-
-GKE 서비스 에이전트(`service-<프로젝트번호>@container-engine-robot.iam.gserviceaccount.com`)는 해당 프로젝트에서 Kubernetes Engine API를 활성화할 때 생성됩니다. 생성 전에는 권한 부여가 `INVALID_ARGUMENT: Service account ... does not exist` 로 실패하므로 API 활성화를 먼저 수행합니다.
-
-```bash
-# 실행 위치: infra-son01 또는 Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
-gcloud services enable container.googleapis.com \
-  --project=gcp-sbx-gke01 --account="$ADMIN_ACCOUNT"
-
-gcloud projects get-iam-policy gcp-sbx-gke01 \
-  --flatten="bindings[].members" \
-  --filter="bindings.members:container-engine-robot" \
-  --format="value(bindings.members)" --account="$ADMIN_ACCOUNT"
-```
-
-서비스 에이전트 생성을 확인한 뒤 권한을 부여합니다. 변수가 비어 있으면 잘못된 계정 이름이 전달되므로, 실행 전 `echo` 로 치환 결과를 확인합니다.
-
-```bash
-# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net (Shared VPC 관리자)
-export HOST="gcp-prod-edp-hub-vpchost"
-export REGION="asia-northeast3"
-export MAIN_SUBNET="subnet-prod-sbx-gke-01"
-export PN="402269387486"   # gcp-sbx-gke01 프로젝트 번호
-echo "HOST=$HOST / PN=$PN"
-
-for M in \
-  "serviceAccount:tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com" \
-  "serviceAccount:service-${PN}@container-engine-robot.iam.gserviceaccount.com" \
-  "serviceAccount:${PN}@cloudservices.gserviceaccount.com"; do
-  gcloud compute networks subnets add-iam-policy-binding "$MAIN_SUBNET" \
-    --project="$HOST" --region="$REGION" \
-    --member="$M" --role=roles/compute.networkUser \
-    --account="admin@sonmap.net"
-done
-
-gcloud projects add-iam-policy-binding "$HOST" \
-  --member="serviceAccount:service-${PN}@container-engine-robot.iam.gserviceaccount.com" \
-  --role=roles/container.hostServiceAgentUser \
-  --account="admin@sonmap.net"
-```
-
-연결과 권한 부여를 마친 뒤 앞의 `list-usable` 을 다시 실행해 `subnet-prod-sbx-gke-01` 이 목록에 나타나는지 확인합니다.
+이 400 오류는 "프로젝트 없음" 과 "연결 안 됨" 을 구분하지 않습니다. 호스트에는 `gcp-sbx-edp-gke01` (예전) 과 `gcp-sbx-gke01` (지금) 처럼 한 토막만 다른 ID 가 함께 붙어 있을 수 있으니 ID 부터 확인합니다.
 
 </details>
 
@@ -2100,6 +2097,8 @@ gcloud artifacts repositories describe "${AR_REPOSITORY}" --project="${AR_PROJEC
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 | 실행 계정: admin@sonmap.net (edge 프로젝트 관리자)
+export AR_ADMIN_ACCOUNT="admin@sonmap.net"
+export AR_PROJECT="gcp-prod-edp-edge-509423"
 gcloud projects test-iam-permissions "${AR_PROJECT}" \
   --permissions=artifactregistry.repositories.get,artifactregistry.repositories.setIamPolicy \
   --account="${AR_ADMIN_ACCOUNT}"
