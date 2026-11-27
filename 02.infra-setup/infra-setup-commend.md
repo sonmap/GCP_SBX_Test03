@@ -49,7 +49,7 @@
 | 오류 | 원인 | 조치 |
 |---|---|---|
 | `does not have permission to access projects instance [gcp-sbx-gke01]` | `user01` 그룹에 역할이 없음 | 0-0 의 2) `--apply` |
-| `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` | `infra-son01` 의 API 경로가 그 명령(주로 `beta`)을 막음 | 그 명령만 Cloud Shell 에서 admin 으로 실행 |
+| `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` · `not available on Google's Restricted VIPs` | `infra-son01` 의 API 경로가 그 명령(주로 `beta`) 또는 그 API(Cloud Identity 등)를 막음 | 그 명령만 Cloud Shell 에서 실행 (절에 적힌 계정으로) |
 | `does not have any valid credentials` (Cloud Shell) | Cloud Shell 에 그 계정 로그인이 없음 | `gcloud config set account admin@sonmap.net` |
 | `service-@…` 또는 `service-…@… does not exist` | 프로젝트 번호 변수가 비었거나 서비스 에이전트가 없음 | 0-1 다시 실행, 1-2 실행 여부 확인 |
 | `describe` 의 `NOT_FOUND` | 아직 없는 자원 조회 | 정상. 바로 다음 `create` 를 실행 |
@@ -534,26 +534,35 @@ gcloud auth print-access-token --impersonate-service-account="${TF_MANAGER}" \
 
 **Workspace 그룹 권한 확인 (1-4-2 를 했을 때)** · `tf-manager` 가 Workspace 그룹을 조회할 수 있는지 봅니다.
 
+1) 고객 ID 조회 — `infra-son01` 에서 실행합니다.
+
 ```bash
-# 실행 위치 infra-son01 | 계정 user01@sonmap.net | 가장 tf-manager
-# 1) Workspace 고객 ID 조회 (C 로 시작하는 값)
+# 실행 위치 infra-son01 | 계정 admin@sonmap.net
 export CUSTOMER_ID="$(gcloud organizations list --account=admin@sonmap.net \
   --filter='displayName=sonmap.net' --format='value(owner.directoryCustomerId)')"
-echo "customer id: ${CUSTOMER_ID}"
-
-# 2) tf-manager 로 그룹 목록 조회 → 표가 나오면 성공 (그룹이 하나도 없으면 빈 표)
-gcloud identity groups search --customer="${CUSTOMER_ID}" \
-  --labels=cloudidentity.googleapis.com/groups.discussion_forum \
-  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
-  --format='table(name,groupKey.id)'
+echo "customer id: ${CUSTOMER_ID}"        # C 로 시작하는 값 (sonmap.net 은 C03rw3vtp)
 ```
 
-| 결과 | 조치 |
+비어 있으면 admin.google.com → 계정 → 계정 설정 → 프로필의 **고객 ID** 를 봅니다.
+
+2) 그룹 조회 — **Cloud Shell 에서 `user01` 로 실행합니다.** Cloud Identity API 는 `infra-son01` 의 경로(Restricted VIP)에서 지원되지 않아 VM 에서는 `not available on Google's Restricted VIPs` (403) 가 납니다. Cloud Shell 은 admin 으로 열리지만 admin 에는 `tf-manager` 가장 권한이 없으므로, 첫 줄에서 `user01` 로 로그인합니다(출력되는 주소를 브라우저에서 열어 `user01` 로 승인하고 코드를 붙여 넣습니다).
+
+```bash
+# 실행 위치 Cloud Shell | 계정 user01@sonmap.net | 가장 tf-manager
+gcloud auth login user01@sonmap.net --no-launch-browser
+gcloud identity groups search --customer=C03rw3vtp \
+  --labels=cloudidentity.googleapis.com/groups.discussion_forum \
+  --account=user01@sonmap.net \
+  --impersonate-service-account=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com \
+  --format='table(name,groupKey.id)'
+gcloud config set account admin@sonmap.net      # Cloud Shell 기본 계정으로 되돌림
+```
+
+| 결과 | 뜻 · 조치 |
 |---|---|
-| `customer id:` 가 비어 있음 | admin.google.com → 계정 → 계정 설정 → 프로필의 **고객 ID** 를 보고 `export CUSTOMER_ID=C…` 로 직접 넣습니다 |
-| `getAccessToken denied` | 위 가장 확인부터 다시 |
+| 그룹 표가 나옴 (`pgrp-gcp-sbx01@sonmap.net` 등) | 성공 |
+| `getAccessToken denied` | 1-8 의 가장 권한 반영 대기. 위 가장 확인부터 다시 |
 | `PERMISSION_DENIED` (groups.search) | 1-4-2 의 역할 할당이 아직 반영되지 않음. 몇 분 뒤 재시도, 그래도 안 되면 1-4-2 의 관리자 목록에 `tf-manager` 가 있는지 확인 |
-| `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` | 이 VM 경로에서 Cloud Identity API 가 막힘. Cloud Shell 에서 `gcloud auth login user01@sonmap.net` 후 같은 블록을 실행 (변수 `ADMIN_ACCOUNT=user01@sonmap.net`, `TF_MANAGER=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com` 먼저 지정) |
 
 3) 저장소에 적힌 고객 ID 와 같은지 확인합니다. Provisioner 가 이 값으로 Workspace 디렉터리를 지정합니다.
 
@@ -2459,6 +2468,7 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-https --project="
 | Private Pool → `registry.terraform.io` · `releases.hashicorp.com` HTTPS | Kubernetes provider 는 Google 관리 provider 가 아니라 실행할 때 내려받습니다 | 아래 점검 빌드 |
 | Private Pool → GKE DNS 엔드포인트 | Terraform 이 kubeconfig 없이 접근 토큰으로 클러스터에 접속합니다 | [Private Pool GKE 접속 점검](reference/cloudbuild-private-gke-vpn-design.md) |
 | `tf-manager` 의 `roles/container.admin` | Namespace · Pod · PV 생성 | 1-7절 |
+| Private Pool → `cloudidentity.googleapis.com` (신규 과제만) | `05-group` 이 그룹을 만듭니다. 이 API 는 Restricted VIP 에서 지원되지 않으므로, Pool 이 Google API 를 Restricted VIP 로만 내보내면 실패합니다 | 첫 신규 과제 배포에서 확인. 실패하면 그룹은 수동 생성하고 `manage_group: false` 로 요청 |
 
 ```bash
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
