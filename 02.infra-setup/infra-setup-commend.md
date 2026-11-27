@@ -28,6 +28,17 @@
 
 기존 환경에서는 자원 조회 결과를 확인한 뒤 필요한 생성·갱신 명령만 실행합니다.
 
+### 자주 나는 오류
+
+| 오류 | 원인 | 조치 |
+|---|---|---|
+| `does not have permission to access projects instance [gcp-sbx-gke01]` | `user01` 그룹에 역할이 없음 | 0-0 의 2) `--apply` |
+| `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` | `infra-son01` 의 API 경로가 그 명령(주로 `beta`)을 막음 | 그 명령만 Cloud Shell 에서 admin 으로 실행 |
+| `does not have any valid credentials` (Cloud Shell) | Cloud Shell 에 그 계정 로그인이 없음 | `gcloud config set account admin@sonmap.net` |
+| `service-@…` 또는 `service-…@… does not exist` | 프로젝트 번호 변수가 비었거나 서비스 에이전트가 없음 | 0-1 다시 실행, 1-2 실행 여부 확인 |
+| `describe` 의 `NOT_FOUND` | 아직 없는 자원 조회 | 정상. 바로 다음 `create` 를 실행 |
+| 만든 직후 `does not exist` · `getAccessToken denied` | IAM 반영 지연 | 1 ~ 2분 뒤 다시 실행 |
+
 <a name="0-공통-변수"></a>
 
 <a name="-0-공통-변수"></a>
@@ -39,30 +50,43 @@
 
 ### 0-0. 시작 전 — 프로젝트와 작업 그룹 권한
 
-0-1 의 프로젝트 번호 조회부터 `user01@sonmap.net` 권한이 필요합니다. 그래서 **0-1 보다 먼저** 관리자 계정으로 두 가지를 확인합니다.
+0-1 의 프로젝트 번호 조회부터 `user01@sonmap.net` 권한이 필요합니다. 그래서 **0-1 보다 먼저** 관리자 계정 `admin@sonmap.net` 으로 아래를 끝냅니다. 처음 한 번만 합니다.
+
+| 계정 | 쓰는 곳 |
+|---|---|
+| `admin@sonmap.net` | 0-0, 1-2(Cloud Shell), Shared VPC 호스트 작업(`VPC_ADMIN_ACCOUNT`) |
+| `user01@sonmap.net` | 그 밖의 모든 절 (`ADMIN_ACCOUNT`). 그룹 `pgrp-gcp-sbx01@sonmap.net` 구성원으로서 권한을 받음 |
 
 ```bash
-# 실행 위치 infra-son01 | 계정 admin@sonmap.net (프로젝트 생성 · IAM 관리자)
+# 실행 위치 infra-son01 (저장소 루트 ~/GCP_SBX_Test03) | 계정 admin@sonmap.net
+cd ~/GCP_SBX_Test03 && git pull
 gcloud auth login admin@sonmap.net
+gcloud config set account admin@sonmap.net
 
-# 1) 프로젝트가 있는지. 없으면 만들고 결제 계정을 연결합니다.
-gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectId,lifecycleState)' \
-  || { gcloud projects create gcp-sbx-gke01 --folder=154455658682 --account=admin@sonmap.net \
-       && gcloud billing projects link gcp-sbx-gke01 --billing-account="<결제 계정 ID>" --account=admin@sonmap.net; }
+# 1) 프로젝트 확인 → "gcp-sbx-gke01  ACTIVE" 가 나와야 합니다.
+gcloud projects describe gcp-sbx-gke01 --format='value(projectId,lifecycleState)'
+#    오류가 나면(프로젝트 없음) 만들고 결제 계정을 연결합니다.
+# gcloud projects create gcp-sbx-gke01 --folder=154455658682
+# gcloud billing projects link gcp-sbx-gke01 --billing-account="<결제 계정 ID>"
 
-# 2) 작업 그룹 권한 (1-0절과 같은 스크립트)
+# 2) 작업 그룹에 역할 부여. 그룹은 Workspace 관리 콘솔에서 미리 만들고 user01 을 넣어 둡니다.
 export SBX_GKE_PROJECT=gcp-sbx-gke01
 export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export IAM_ADMIN_ACCOUNT=admin@sonmap.net
-./02.infra-setup/grant-operator-group.sh            # 계획 확인
-./02.infra-setup/grant-operator-group.sh --apply    # 부여
+./02.infra-setup/grant-operator-group.sh            # 계획: 역할 이름 → ID, "찾지 못함" 건수 확인
+./02.infra-setup/grant-operator-group.sh --apply    # 부여. 마지막에 그룹의 현재 역할 목록 출력
 
-# 3) user01 로 확인 (그룹 권한 반영에 몇 분 걸릴 수 있음)
+# 3) user01 로 전환해 확인. 숫자(프로젝트 번호)가 나오면 성공입니다. 반영까지 몇 분 걸릴 수 있습니다.
 gcloud auth login user01@sonmap.net
-gcloud projects describe gcp-sbx-gke01 --account=user01@sonmap.net --format='value(projectNumber)'
+gcloud config set account user01@sonmap.net
+gcloud config set project gcp-sbx-gke01
+gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)'
 ```
 
-3) 에서 숫자가 나오면 0-1 로 진행합니다.
+- 3) 에서 `does not have permission` 이 나오면 2) 의 `--apply` 결과에 역할 목록이 나왔는지 봅니다. 비어 있으면 `--apply` 를 다시 실행합니다.
+- `gcloud identity groups memberships list` 로 그룹을 조회하면 "그룹이 없다"고 나올 수 있습니다. admin 계정에 Workspace 그룹 조회 권한이 없을 때도 이렇게 나오므로, 그룹 확인은 Workspace 관리 콘솔에서 합니다.
+
+**새 터미널을 열 때마다** 0-1 변수 블록을 다시 실행합니다. 변수가 비면 `service-@…` 같은 오류가 납니다.
 
 <a name="프로젝트-기준과-변수명"></a>
 
@@ -262,35 +286,56 @@ gcloud services enable container.googleapis.com compute.googleapis.com iam.googl
 
 ### 1-2. Google 서비스 에이전트 준비 — API별로 필요한 시스템 계정
 
-> **Cloud Shell 에서 실행합니다.** `gcloud beta services identity create` 는 Service Usage 의 beta API 를 쓰는데, `infra-son01` 처럼 `restricted.googleapis.com` 으로 나가는 VM 에서는 `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` 로 거부됩니다. Cloud Shell 에서 0-1 변수 블록을 다시 실행한 뒤 아래 블록을 실행합니다. 프로젝트 번호가 비어 있으면 `service-@…` 계정 오류가 나므로 첫 줄에서 확인합니다.
+서비스 에이전트는 Google 서비스가 **프로젝트 안에서 대신 일할 때 쓰는 시스템 계정**입니다(`service-<프로젝트 번호>@<서비스 도메인>`). 대부분 처음 쓸 때 자동으로 생기지만, 뒤 절(1-4, 1-8, 2장, 3-12)에서 이 계정들에 권한을 먼저 줘야 하므로 여기서 미리 만듭니다. 없는 상태에서 권한을 주면 `service-…@… does not exist` 오류가 납니다.
+
+| 서비스 | 에이전트가 하는 일 |
+|---|---|
+| Cloud Build | 빌드 실행, Private Pool 연결 |
+| Service Networking | VPC 와 Google 관리 네트워크 피어링 (Private Pool 의 PSA 대역) |
+| Infrastructure Manager (`config`) | 과제 Terraform 05 ~ 50 실행, State 보관 |
+| Cloud Run | Provisioner 실행, 이미지 받기 |
+| Workflows | 요청 워크플로 실행 |
+| GKE (`container`) | 노드 · 디스크 · Shared VPC 서브넷 사용 |
+
+> **이 절만 Cloud Shell 에서, admin 계정으로 실행합니다.**
+> - `infra-son01` 에서는 실행되지 않습니다. VM 이 Google API 를 `restricted.googleapis.com` 으로 호출하는데, 이 경로가 `beta services identity create` 를 `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` 로 거부합니다. 권한이 아니라 경로 문제입니다.
+> - Cloud Shell 은 브라우저에 로그인한 계정(admin)으로 열립니다. `user01` 로 바꾸면 로그인 정보가 없어 `does not have any valid credentials` 가 납니다.
+>
+> 콘솔(https://console.cloud.google.com) 오른쪽 위 `>_` 를 눌러 Cloud Shell 을 연 뒤 아래 블록을 그대로 붙여 넣습니다. 변수 블록은 필요 없습니다.
 
 ```bash
-# 실행 위치 Cloud Shell | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
-[[ "${SBX_GKE_PROJECT_NUMBER}" =~ ^[0-9]+$ ]] || { echo "SBX_GKE_PROJECT_NUMBER 가 비어 있습니다. 0-1 을 다시 실행하세요."; return 1 2>/dev/null || exit 1; }
-gcloud beta services identity create --service=cloudbuild.googleapis.com \
-  --project="${SBX_GKE_PROJECT}" --account="${ADMIN_ACCOUNT}"
-gcloud beta services identity create --service=servicenetworking.googleapis.com \
-  --project="${SBX_GKE_PROJECT}" --account="${ADMIN_ACCOUNT}"
-gcloud beta services identity create --service=config.googleapis.com --project="${SBX_GKE_PROJECT}" \
-  --account="${ADMIN_ACCOUNT}"
-gcloud beta services identity create --service=run.googleapis.com --project="${SBX_GKE_PROJECT}" \
-  --account="${ADMIN_ACCOUNT}"
-gcloud beta services identity create --service=workflows.googleapis.com --project="${SBX_GKE_PROJECT}" \
-  --account="${ADMIN_ACCOUNT}"
-gcloud beta services identity create --service=container.googleapis.com --project="${SBX_GKE_PROJECT}" \
-  --account="${ADMIN_ACCOUNT}"
-# Service Networking 시스템 계정의 역할은 사용자 계정에 부여하지 않습니다.
-gcloud projects add-iam-policy-binding "${SBX_GKE_PROJECT}" \
-  --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@service-networking.iam.gserviceaccount.com" \
-  --role=roles/servicenetworking.serviceAgent --condition=None --account="${ADMIN_ACCOUNT}"
+# 실행 위치 Cloud Shell | 대상 gcp-sbx-gke01 | 계정 admin@sonmap.net
+gcloud config set account admin@sonmap.net
+gcloud config set project gcp-sbx-gke01
+PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --format='value(projectNumber)')"
+echo "project number: ${PROJECT_NUMBER}"        # 숫자가 나와야 합니다
 
+for svc in cloudbuild servicenetworking config run workflows container; do
+  gcloud beta services identity create --service=${svc}.googleapis.com --project=gcp-sbx-gke01
+done
+
+# Service Networking 에이전트의 역할 (사용자 계정에는 주지 않습니다)
+gcloud projects add-iam-policy-binding gcp-sbx-gke01 \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@service-networking.iam.gserviceaccount.com" \
+  --role=roles/servicenetworking.serviceAgent --condition=None --format=none
 ```
+
+서비스마다 `Service identity created: service-<번호>@…` 가 나오면 성공입니다. 이 절은 프로젝트당 한 번이면 됩니다. 이후는 다시 `infra-son01` 에서 `user01` 로 진행합니다.
 
 <a name="-3-사용자-관리-서비스-계정--sbx-manager--tf-manager"></a>
 
 <a name="3-사용자-관리-서비스-계정--sbx-manager--tf-manager"></a>
 
 ### 1-3. 사용자 관리 서비스 계정 — sbx-manager · tf-manager
+
+자동화가 쓰는 계정 두 개를 만듭니다. 권한은 1-4 절부터 줍니다.
+
+| 계정 | 쓰는 곳 | 하는 일 |
+|---|---|---|
+| `sbx-manager` | Cloud Run (Provisioner) · Workflows | 요청 검증, 번들 생성, 배포 빌드 시작. 자원을 직접 만들지 않음 |
+| `tf-manager` | Infrastructure Manager · Cloud Build | 실제 자원 생성 (그룹 · 프로젝트 · 데이터 · GKE 워크로드 · ALB 연결). 명령서의 `--impersonate-service-account` 대상 |
+
+요청을 받는 쪽(`sbx-manager`)과 자원을 바꾸는 쪽(`tf-manager`)을 나눠, 요청 처리 쪽이 뚫려도 자원을 직접 바꿀 수 없게 합니다.
 
 ```bash
 
@@ -310,6 +355,10 @@ gcloud iam service-accounts create tf-manager --project="${SBX_GKE_PROJECT}" --d
   --account="${ADMIN_ACCOUNT}"
 
 ```
+
+처음 실행하면 `describe` 가 `ERROR: … NOT_FOUND: Unknown service account` 를 내고 이어서 `Created service account [...]` 가 나옵니다. **새 프로젝트에서는 정상**입니다. `describe` 가 계정 정보를 출력하면 이미 있는 것이니 바로 다음 `create` 는 건너뜁니다. `PERMISSION_DENIED` 이면 0-0 의 3) 부터 다시 확인합니다.
+
+만든 직후 다음 절에서 `does not exist` 가 나오면 1분쯤 기다렸다가 같은 명령을 다시 실행합니다.
 
 <a name="-4-tf-manager-권한--cicd-기반-구축--build--infrastructure-manager"></a>
 
@@ -478,6 +527,15 @@ gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${
   --role=roles/iam.serviceAccountTokenCreator --condition=None --account="${ADMIN_ACCOUNT}"
 
 ```
+
+**확인** · 여기까지 끝나면 `user01` 이 `tf-manager` 를 가장할 수 있어야 합니다. 이후 `--impersonate-service-account="${TF_MANAGER}"` 가 붙은 명령은 모두 이것이 전제입니다.
+
+```bash
+gcloud auth print-access-token --impersonate-service-account="${TF_MANAGER}" \
+  --account="${ADMIN_ACCOUNT}" >/dev/null && echo "impersonation OK"
+```
+
+`Permission 'iam.serviceAccounts.getAccessToken' denied` 가 나오면 권한 반영 대기입니다. 1 ~ 2분 뒤 다시 실행합니다.
 
 <a name="-9-tf-manager-권한--지정-folder의-프로젝트-생성--iam"></a>
 
