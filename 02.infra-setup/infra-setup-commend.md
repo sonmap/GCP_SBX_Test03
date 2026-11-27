@@ -2489,10 +2489,37 @@ gcloud builds submit . --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
 
 <a name="20-run-deploy-run-sbxtest01-provisioner"></a>
 
-### 3-20. run deploy run-sbxtest01-provisioner
+### 3-20. 요청 접수 서비스(Provisioner) 배포 — Cloud Run `run-sbxtest01-provisioner`
+
+**Provisioner** 는 과제 요청 JSON 을 받아 처리를 시작하는 작은 웹 서비스입니다(코드 `03.sandbox_deploy/03.1.request/main.py`). Cloud Run 에서 `sbx-manager` 계정으로 실행됩니다. 3-20 ~ 3-26 은 이 서비스와 그 앞의 Workflow 를 한 번 설치하는 절입니다.
+
+```mermaid
+flowchart LR
+    U["작업자 · 포털<br/>요청 JSON"] -->|"① 업로드"| RQ[("버킷 requests")]
+    U -->|"② 실행"| WF["Workflow<br/>workflow-sbxtest01-provision<br/>(3-23)"]
+    WF -->|"③ 호출 (3-21 권한)"| CR["Cloud Run<br/>run-sbxtest01-provisioner<br/>(3-20) · sbx-manager"]
+    CR -->|"④ 요청 읽기 · 검증"| RQ
+    CR -->|"⑤ 단계별 Terraform ZIP"| BU[("버킷 bundles")]
+    CR -->|"⑥ 빌드 시작"| CB["Cloud Build (Private Pool)<br/>tf-manager<br/>→ Infrastructure Manager · ALB"]
+```
+
+| Provisioner 가 하는 일 | 내용 |
+|---|---|
+| 검증 | 요청 형식(schema 2.0), 환경 규칙(영역 · 이름 · 이미지 저장소 · 도메인), 이전 적용분과 비교 |
+| 번들 생성 | 요청이 관리하는 단계(05 ~ 50)의 Terraform ZIP 과 변수를 `bundles` 버킷에 저장 |
+| 빌드 시작 | Private Pool 에서 Infrastructure Manager 적용 → ALB 연결 빌드를 `tf-manager` 로 시작 |
+
+| 옵션 | 뜻 |
+|---|---|
+| `--image …:bootstrap` | 3-19 에서 올린 이미지로 첫 배포. 이후 릴리스 게시 때 `:git-<커밋>` 으로 바뀜 |
+| `--service-account=sbx-manager` | 서비스의 실행 계정 |
+| `--no-allow-unauthenticated` | 아무나 호출 못 함. 3-21 에서 Workflow 만 호출 허용 |
+| `--env-vars-file=…/provisioner-env.yaml` | 프로젝트 · 버킷 · 영역 · 도메인 · 로그인 방식 등 환경 값 (저장소 파일) |
+| `--max-instances=2` | 요청 처리용이라 인스턴스는 적게 |
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager | 워크로드 실행: sbx-manager
+cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
@@ -2512,7 +2539,7 @@ gcloud run deploy run-sbxtest01-provisioner --project="${SBX_GKE_PROJECT}" --reg
 
 <a name="21-run-services-add-iam-policy-binding-run-sbxtest01-provisioner--rolesruninvoker"></a>
 
-### 3-21. run services add-iam-policy-binding run-sbxtest01-provisioner · roles/run.invoker
+### 3-21. Provisioner 호출 권한 — Workflow 가 Cloud Run 을 부를 수 있게
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
@@ -2531,7 +2558,7 @@ gcloud run services add-iam-policy-binding run-sbxtest01-provisioner --project="
 
 <a name="22-run-services-describe-run-sbxtest01-provisioner"></a>
 
-### 3-22. run services describe run-sbxtest01-provisioner
+### 3-22. Provisioner 배포 확인
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
@@ -2558,7 +2585,7 @@ sed "s|__PROVISIONER_URL__|${PROVISIONER_URL}|g" 03.sandbox_deploy/03.1.request/
 
 <a name="23-workflows-deploy-workflow-sbxtest01-provision"></a>
 
-### 3-23. workflows deploy workflow-sbxtest01-provision
+### 3-23. 요청 Workflow 배포 — `workflow-sbxtest01-provision`
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager | 워크로드 실행: sbx-manager
@@ -2577,7 +2604,7 @@ gcloud workflows deploy workflow-sbxtest01-provision --project="${SBX_GKE_PROJEC
 
 <a name="24-projects-add-iam-policy-binding-gcp-sbx-gke01--rolesworkflowsinvoker"></a>
 
-### 3-24. projects add-iam-policy-binding gcp-sbx-gke01 · roles/workflows.invoker
+### 3-24. Workflow 실행 권한
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
@@ -2595,7 +2622,7 @@ gcloud projects add-iam-policy-binding "${SBX_GKE_PROJECT}" --member="${OPERATOR
 
 <a name="25-storage-buckets-add-iam-policy-binding-gsgcp-sbx-gke01-sbxtest01-requests--rolesstorageobjectadmin"></a>
 
-### 3-25. storage buckets add-iam-policy-binding gs://gcp-sbx-gke01-sbxtest01-requests · roles/storage.objectAdmin
+### 3-25. 요청 버킷 권한 — `requests`
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
@@ -2613,7 +2640,7 @@ gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01
 
 <a name="26-storage-buckets-add-iam-policy-binding-gsgcp-sbx-gke01-sbxtest01-bundles--rolesstorageobjectviewer"></a>
 
-### 3-26. storage buckets add-iam-policy-binding gs://gcp-sbx-gke01-sbxtest01-bundles · roles/storage.objectViewer
+### 3-26. 번들 버킷 권한 — `bundles`
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
