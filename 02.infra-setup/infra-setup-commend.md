@@ -2408,17 +2408,43 @@ docker build -t "${AR_REPO}/run-sbxtest01-provisioner:bootstrap" \
   03.sandbox_deploy/03.1.request
 ```
 
-**3. 이미지 업로드 및 확인** · 두 빌드가 성공하면 같은 터미널에서 실행합니다.
+**3. 이미지 업로드 및 확인** · 두 빌드가 성공하면 같은 터미널에서 실행합니다. 업로드와 조회 모두 `tf-manager` 권한으로 합니다. `user01` 은 edge 저장소에 권한이 없습니다.
+
+VM 에 `gcloud auth configure-docker` 가 설정돼 있으면(`~/.docker/config.json` 의 `credHelpers`) Docker 는 위 `docker login` 대신 **gcloud 의 현재 계정(user01)** 으로 인증합니다. 그래서 `CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT` 를 붙여 그 경우에도 `tf-manager` 로 올라가게 합니다.
 
 ```bash
-# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 (AR) | 실행 계정: user01@sonmap.net (AR 인증)
+# 실행 위치: infra-son01 | 대상: gcp-prod-edp-edge-509423 (AR) | 실행 계정: user01@sonmap.net | 가장: tf-manager
 export AR_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
-docker push "${AR_REPO}/sbxtest01-automation-runner:bootstrap"
-docker push "${AR_REPO}/run-sbxtest01-provisioner:bootstrap"
 
-gcloud artifacts docker images list "$AR_REPO" \
-  --include-tags --account="$AR_ACCOUNT"
+CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT="$TF_MANAGER" CLOUDSDK_CORE_ACCOUNT="$AR_ACCOUNT" \
+  docker push "${AR_REPO}/sbxtest01-automation-runner:bootstrap"
+CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT="$TF_MANAGER" CLOUDSDK_CORE_ACCOUNT="$AR_ACCOUNT" \
+  docker push "${AR_REPO}/run-sbxtest01-provisioner:bootstrap"
+
+gcloud artifacts docker images list "$AR_REPO" --include-tags \
+  --account="$AR_ACCOUNT" --impersonate-service-account="$TF_MANAGER"
+```
+
+`uploadArtifacts denied` 가 나오면 아래 순서로 확인합니다.
+
+```bash
+# 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-prod-edp-edge-509423 (조회) | 실행 계정: admin@sonmap.net (edge 프로젝트 관리자)
+export AR_ADMIN_ACCOUNT="admin@sonmap.net"
+# ① 저장소가 있는지 → 경로와 DOCKER 가 나와야 함. NOT_FOUND 면 3-10 의 생성 블록
+gcloud artifacts repositories describe ar-sbxtest01-platform --project=gcp-prod-edp-edge-509423 \
+  --location=asia-northeast3 --account="$AR_ADMIN_ACCOUNT" --format='value(name,format)'
+# ② 저장소 권한 → tf-manager 가 roles/artifactregistry.writer 로 보여야 함. 없으면 3-11
+gcloud artifacts repositories get-iam-policy ar-sbxtest01-platform --project=gcp-prod-edp-edge-509423 \
+  --location=asia-northeast3 --account="$AR_ADMIN_ACCOUNT" \
+  --flatten='bindings[].members' --format='table(bindings.role,bindings.members)'
+```
+
+```bash
+# 실행 위치: infra-son01 | 대상: 로컬 Docker 설정 | 실행 계정: 불필요
+# ③ Docker 가 어떤 방식으로 인증하는지 → credHelpers 에 asia-northeast3-docker.pkg.dev 가 있으면 gcloud 계정 사용
+cat ~/.docker/config.json
 ```
 
 두 이미지에 `bootstrap` 태그가 표시되면 3-20절으로 진행합니다.
