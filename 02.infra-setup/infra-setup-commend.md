@@ -545,7 +545,7 @@ echo "customer id: ${CUSTOMER_ID}"        # C 로 시작하는 값 (sonmap.net �
 
 비어 있으면 admin.google.com → 계정 → 계정 설정 → 프로필의 **고객 ID** 를 봅니다.
 
-2) 그룹 조회 — **Cloud Shell 에서 `user01` 로 실행합니다.** Cloud Identity API 는 `infra-son01` 의 경로(Restricted VIP)에서 지원되지 않아 VM 에서는 `not available on Google's Restricted VIPs` (403) 가 납니다. Cloud Shell 은 admin 으로 열리지만 admin 에는 `tf-manager` 가장 권한이 없으므로, 첫 줄에서 `user01` 로 로그인합니다(출력되는 주소를 브라우저에서 열어 `user01` 로 승인하고 코드를 붙여 넣습니다).
+2) 그룹 조회 — **Cloud Shell 에서 `user01` 로 실행합니다.** Cloud Identity API 는 `infra-son01` 의 경로(Restricted VIP)에서 지원되지 않아 VM 에서는 `not available on Google's Restricted VIPs` (403) 가 납니다. Cloud Shell 은 admin 으로 열리지만 admin 에는 `tf-manager` 가장 권한이 없으므로, 첫 줄에서 `user01` 로 로그인합니다(출력되는 주소를 브라우저에서 열어 `user01` 로 승인하고 코드를 붙여 넣습니다). 이미 로그인한 적이 있으면 "already authenticated" 질문에 `n` 으로 답해도 됩니다.
 
 ```bash
 # 실행 위치 Cloud Shell | 계정 user01@sonmap.net | 가장 tf-manager
@@ -554,13 +554,13 @@ gcloud identity groups search --customer=C03rw3vtp \
   --labels=cloudidentity.googleapis.com/groups.discussion_forum \
   --account=user01@sonmap.net \
   --impersonate-service-account=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com \
-  --format='table(name,groupKey.id)'
+  --flatten='groups[]' --format='table(groups.groupKey.id,groups.name)'
 gcloud config set account admin@sonmap.net      # Cloud Shell 기본 계정으로 되돌림
 ```
 
 | 결과 | 뜻 · 조치 |
 |---|---|
-| 그룹 표가 나옴 (`pgrp-gcp-sbx01@sonmap.net` 등) | 성공 |
+| 그룹 표가 나옴 (`pgrp-gcp-sbx01@sonmap.net` 등). 그룹이 없으면 빈 결과 | 성공. 오류만 없으면 권한은 정상 |
 | `getAccessToken denied` | 1-8 의 가장 권한 반영 대기. 위 가장 확인부터 다시 |
 | `PERMISSION_DENIED` (groups.search) | 1-4-2 의 역할 할당이 아직 반영되지 않음. 몇 분 뒤 재시도, 그래도 안 되면 1-4-2 의 관리자 목록에 `tf-manager` 가 있는지 확인 |
 
