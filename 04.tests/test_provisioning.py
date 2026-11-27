@@ -47,9 +47,10 @@ class RequestRuleTests(unittest.TestCase):
             p.validate_semantics(request)
 
     def test_stages_follow_what_the_request_manages(self):
-        self.assertEqual(p.enabled_stages(make_request()), ['05-group', '10-project', '30-project-iam', '40-data'])
+        self.assertEqual(p.enabled_stages(make_request()),
+                         ['05-group', '10-project', '30-project-iam', '40-data', '50-workload'])
         # A migrated task already has its group, project and data.
-        self.assertEqual(p.enabled_stages(make_request(migrated=True)), [])
+        self.assertEqual(p.enabled_stages(make_request(migrated=True)), ['50-workload'])
 
     def test_image_must_be_digest_pinned(self):
         request = make_request(migrated=True)
@@ -133,9 +134,15 @@ class BundleAndBuildTests(unittest.TestCase):
             prefix, manifest = p.assemble_bundles(request, b'{}')
         return written, manifest, fetched
 
-    def test_new_task_bundles_four_stages(self):
+    def test_new_task_bundles_five_stages(self):
         written, manifest, _ = self.assemble(make_request())
-        self.assertEqual(set(manifest['bundles']), {'05-group', '10-project', '30-project-iam', '40-data'})
+        self.assertEqual(set(manifest['bundles']), {'05-group', '10-project', '30-project-iam', '40-data', '50-workload'})
+        workload_zip = next(v for k, v in written.items() if k.endswith('/workload.zip'))
+        with zipfile.ZipFile(io.BytesIO(workload_zip)) as archive:
+            names = archive.namelist()
+            self.assertIn('templates/jupyterhub_config.py.tftpl', names)
+            variables = json.loads(archive.read('terraform.auto.tfvars.json'))
+            self.assertEqual(variables['namespace'], 'sbx-general-sbx03')
         data_zip = next(v for k, v in written.items() if k.endswith('/data.zip'))
         with zipfile.ZipFile(io.BytesIO(data_zip)) as archive:
             variables = json.loads(archive.read('terraform.auto.tfvars.json'))
@@ -145,10 +152,9 @@ class BundleAndBuildTests(unittest.TestCase):
             # The Workload Identity binding moved to 50-workload, next to the KSA.
             self.assertNotIn('workloadIdentityUser', archive.read('main.tf').decode())
 
-    def test_migrated_task_needs_no_bundle_and_no_source_download(self):
-        written, manifest, fetched = self.assemble(make_request(migrated=True))
-        self.assertEqual(manifest['bundles'], {})
-        fetched.assert_not_called()
+    def test_migrated_task_bundles_only_the_workload(self):
+        written, manifest, _ = self.assemble(make_request(migrated=True))
+        self.assertEqual(set(manifest['bundles']), {'50-workload'})
         self.assertTrue(any(k.endswith('/approved-request.json') for k in written))
 
     def build_spec(self, request):
@@ -158,24 +164,29 @@ class BundleAndBuildTests(unittest.TestCase):
             p.start_build(request, 'gs://r/approved/x/request.json', 'gs://b/requests/x/git-test123')
         return create.call_args.kwargs['build']
 
-    def test_one_build_runs_terraform_then_alb(self):
-        for request in (make_request(), make_request(migrated=True)):
-            spec = self.build_spec(request)
-            self.assertEqual([step['id'] for step in spec['steps']], ['terraform', 'alb'])
-            terraform, alb = spec['steps']
-            self.assertEqual(terraform['args'][0], '/opt/sandbox/run_terraform.py')
-            self.assertTrue(terraform['name'].endswith('sbxtest01-automation-runner:git-test123'))
-            self.assertIn('TF_STATE_BUCKET=' + ENV['TF_STATE_BUCKET'], terraform['env'])
-            self.assertEqual(alb['args'][0], '/opt/sandbox/reconcile_postdeploy.py')
-            self.assertEqual(spec['options']['pool']['name'], ENV['WORKER_POOL'])
-            # No Infrastructure Manager anywhere: one Terraform path, one state place.
-            self.assertNotIn('infra-manager', json.dumps(spec))
+    def test_every_stage_is_an_infrastructure_manager_deployment(self):
+        spec = self.build_spec(make_request())
+        self.assertEqual([step['id'] for step in spec['steps']], ['terraform', 'alb'])
+        script = spec['steps'][0]['args'][-1]
+        self.assertEqual(script.count('gcloud infra-manager deployments apply'), 5)
+        for suffix in ['group', 'project', 'project-iam', 'data', 'workload']:
+            self.assertIn(f'/deployments/sbxtest01-sbx03-', script)
+            self.assertIn(f'-{suffix}\" ', script)
+        self.assertIn('--worker-pool=', script)
+        self.assertIn('--tf-version-constraint=', script)
+        # Order: workload last.
+        self.assertGreater(script.index('-workload'), script.index('-data'))
 
-    def test_every_stage_uses_the_same_gcs_backend(self):
-        for stage in ['05-group', '10-project', '30-project-iam', '40-data', '50-workload']:
-            versions = (TF / stage / 'versions.tf').read_text()
-            self.assertIn('backend "gcs" {}', versions, stage)
-            self.assertIn('prefix=tasks/<task>/', versions, stage)
+    def test_migrated_task_has_one_deployment(self):
+        script = self.build_spec(make_request(migrated=True))['steps'][0]['args'][-1]
+        self.assertEqual(script.count('gcloud infra-manager deployments apply'), 1)
+        self.assertIn('-workload', script)
+
+    def test_alb_step_reads_the_request_from_gcs(self):
+        alb = self.build_spec(make_request())['steps'][1]
+        self.assertEqual(alb['args'], ['/opt/sandbox/reconcile_postdeploy.py',
+                                       'gs://b/requests/x/git-test123/approved-request.json'])
+        self.assertTrue(alb['name'].endswith('sbxtest01-automation-runner:git-test123'))
 
 
 if __name__ == '__main__':

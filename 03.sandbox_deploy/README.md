@@ -6,7 +6,7 @@
 flowchart LR
     J["요청 JSON<br/>(포털 · 지금은 수동)"] --> G["GCS approved/"]
     G --> W["Workflow"] --> R["Cloud Run<br/>검증 · 번들"]
-    R --> B["Cloud Build · Runner<br/>Terraform 05 → 10 → 30 → 40 → 50<br/>State gs://…-tfstate/tasks/&lt;과제&gt;/&lt;단계&gt;"]
+    R --> B["Infrastructure Manager<br/>05 → 10 → 30 → 40 → 50<br/>배포 · State 과제 × 단계별"]
     B --> C["Runner<br/>ALB 연결 · 확인 · 기록"]
 ```
 
@@ -14,7 +14,7 @@ flowchart LR
 |---|---|
 | [03.1.request](03.1.request/README.md) | 요청 형식, 접수 API |
 | [03.2.terraform](03.2.terraform/README.md) | 과제별 Terraform 5단계 · State 위치 |
-| [03.3.gke](03.3.gke/README.md) | Runner (Terraform 실행, ALB 연결) |
+| [03.3.gke](03.3.gke/README.md) | Runner (ALB 연결) |
 
 **수행 위치** · 관리 VM 의 Test03 저장소 루트
 
@@ -130,11 +130,13 @@ gcloud builds list --project="$SBX_GKE_PROJECT" --region="$REGION" \
   --account="$ADMIN_ACCOUNT" --limit=5 --format='table(id,status,createTime)'
 ```
 
-상위 빌드 로그에 적힌 **하위 빌드 ID** 로 조회해야 Terraform 과 ALB 로그가 보입니다.
+Terraform 로그는 Infrastructure Manager 배포의 리비전에서, ALB 로그는 이 빌드의 `alb` 단계에서 봅니다.
 
 ```bash
-gcloud builds log "<하위 빌드 ID>" --project="$SBX_GKE_PROJECT" --region="$REGION" \
+gcloud builds log "<빌드 ID>" --project="$SBX_GKE_PROJECT" --region="$REGION" \
   --account="$ADMIN_ACCOUNT" 2>&1 | tail -50
+gcloud infra-manager deployments list --project="$SBX_GKE_PROJECT" --location="$REGION" \
+  --filter="labels.task=<과제>" --account="$ADMIN_ACCOUNT"
 ```
 
 마지막 줄이 `[OK] Sandbox <과제> reconcile complete` 이면 끝입니다. 접속 주소는 `https://<host><base_path>` 입니다.
@@ -168,5 +170,6 @@ gcloud builds log "<하위 빌드 ID>" --project="$SBX_GKE_PROJECT" --region="$R
 | 5 | 정적 PV 가 `sbx-static-pd` StorageClass 로 확장되는지 | 디스크 증설 절차를 수동으로 |
 | 6 | `url-maps export → import` 가 fingerprint 충돌을 정확히 알려 주는지 | 재시도 조건 수정 |
 | 7 | `cpu:memory = 1:8` 이 지정한 컴퓨트 클래스에서 그대로 배정되는지 | 클래스 또는 비율 변경 |
-| 8 | Private Pool 에서 Runner 가 GKE 컨트롤 플레인과 State 버킷에 닿는지 | 네트워크 · IAM 보완 |
+| 8 | Infrastructure Manager(Private Pool)가 GKE DNS 엔드포인트와 Terraform 레지스트리에 닿는지 | 네트워크 송신 허용 요청 |
+| 10 | `gcloud infra-manager deployments apply` 의 `--tf-version-constraint` · `--labels` 가 현재 gcloud 에서 받아들여지는지 | 플래그 조정 |
 | 9 | Pod 가 0 일 때도 NEG 가 생성되는지 | 중지 상태 이전(`--stopped`) 시 순서 조정 |

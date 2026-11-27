@@ -7,7 +7,7 @@ ENV = {
     "GKE_CLUSTER_NAME": "gke-sbx-main-an3",
     "BUNDLE_BUCKET": "gcp-sbx-gke01-sbxtest01-bundles",
     "REQUEST_BUCKET": "gcp-sbx-gke01-sbxtest01-requests",
-    "TF_STATE_BUCKET": "gcp-sbx-gke01-sbxtest01-tfstate",
+    "DEPLOYMENT_PREFIX": "sbxtest01",
     "WORKER_POOL": "projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01",
     "RUNNER_IMAGE_REPO": REGISTRY + "/sbxtest01-automation-runner",
     "SHARED_URL_MAP_NAME": "urlmap-alb-sbxtest01-shared",

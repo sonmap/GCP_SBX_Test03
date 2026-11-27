@@ -210,7 +210,7 @@ flowchart TD
     E --> E1["cloudresourcemanager · orgpolicy · cloudbilling · cloudidentity"]
 ```
 
-`config`(Infrastructure Manager)는 Test03 에서 쓰지 않습니다. 모든 Terraform 은 Runner 가 실행하고 State 는 `tfstate` 버킷(4-1절)에 둡니다. 이미 켜져 있어도 문제는 없습니다. Shared VPC 호스트의 네트워크·DNS 준비는 [2절](#2-shared-vpc와-네트워크)에서 진행합니다. `certificatemanager.googleapis.com`은 [3-32절 인증서 준비](#3-32-regional-ssl-인증서-확인-및-등록)에서 별도로 활성화합니다.
+`config`는 Infrastructure Manager에 사용합니다. 과제의 모든 Terraform 단계(05 · 10 · 30 · 40 · 50)가 Infrastructure Manager 배포로 실행되고 State 도 그 배포 안에 있습니다. Shared VPC 호스트의 네트워크·DNS 준비는 [2절](#2-shared-vpc와-네트워크)에서 진행합니다. `certificatemanager.googleapis.com`은 [3-32절 인증서 준비](#3-32-regional-ssl-인증서-확인-및-등록)에서 별도로 활성화합니다.
 
 ```bash
 # [infra-son01] 플랫폼 운영자 · 대상 ${SBX_GKE_PROJECT}
@@ -284,7 +284,7 @@ gcloud iam service-accounts create tf-manager --project="${SBX_GKE_PROJECT}" --d
 
 <a name="4-tf-manager-권한--cicd-기반-구축--build--infrastructure-manager"></a>
 
-### 1-4. tf-manager 권한 — CI/CD 기반 구축 · Build
+### 1-4. tf-manager 권한 — CI/CD 기반 구축 · Build · Infrastructure Manager
 
 #### 1-4-1. GCP 프로젝트 IAM 역할 부여
 
@@ -439,6 +439,9 @@ gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${
 gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \
   --member="serviceAccount:${TF_MANAGER}" --role=roles/iam.serviceAccountTokenCreator --condition=None \
   --account="${ADMIN_ACCOUNT}"
+gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \
+  --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@gcp-sa-config.iam.gserviceaccount.com" \
+  --role=roles/iam.serviceAccountUser --condition=None --account="${ADMIN_ACCOUNT}"
 gcloud iam service-accounts add-iam-policy-binding "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" \
   --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@gcp-sa-cloudbuild.iam.gserviceaccount.com" \
   --role=roles/iam.serviceAccountTokenCreator --condition=None --account="${ADMIN_ACCOUNT}"
@@ -1338,12 +1341,12 @@ flowchart TD
     R -->|승인 요청 읽기| W["Workflow가 실행하는 배포 구성요소"]
     S["플랫폼 릴리스 Cloud Build"] -->|release.json과 소스 ZIP 게시| B["bundles · 3-3~3-4"]
     V["Provisioner"] -->|요청별 배포 번들 저장| B
-    B -->|Terraform ZIP 읽기| I["Runner (Cloud Build · tf-manager)"]
+    B -->|Terraform ZIP 읽기| I["Infrastructure Manager"]
     M["관리 VM의 gcloud builds submit"] -->|빌드 소스 업로드| U["build-source · 3-5~3-6"]
     U -->|빌드 소스 읽기| C["Cloud Build"]
 ```
 
-3-7~3-8절은 `sbx-manager`에 두 버킷(`requests`, `bundles`)의 객체 관리 권한을 부여합니다. 3-9절은 Runner 실행 계정 `tf-manager` 에 `bundles` 의 객체 읽기 권한을 부여합니다. Terraform State 는 4-1절의 `tfstate` 버킷에 따로 둡니다.
+3-7~3-8절은 `sbx-manager`에 두 버킷(`requests`, `bundles`)의 객체 관리 권한을 부여합니다. 3-9절은 Infrastructure Manager 서비스 에이전트에 `bundles`의 객체 읽기 권한을 부여합니다.
 
 필요한 변수 선언을 아래 코드 블록 맨 앞에 포함했습니다. 별도 문서에서 변수를 설정할 필요 없이, 이 문서의 선언부터 같은 터미널에서 실행합니다. `# 주석`을 보며 순서대로 실행하고, **기존 자원이 있으면 해당 생성 명령을 건너뜁니다.** 403·인증·연결 오류면 중단합니다. 선택 작업은 주석을 해제한 경우에만 실행합니다.
 
@@ -1521,7 +1524,7 @@ gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01
 ```bash
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}
 gcloud storage buckets add-iam-policy-binding "gs://${SBX_GKE_PROJECT}-sbxtest01-bundles" \
-  --member="serviceAccount:${TF_MANAGER}" \
+  --member="serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@gcp-sa-config.iam.gserviceaccount.com" \
   --role=roles/storage.objectViewer --account="${ADMIN_ACCOUNT}" \
   --impersonate-service-account="${TF_MANAGER}"
 
@@ -1764,7 +1767,7 @@ gcloud artifacts docker images list "$AR_REPO" \
   --include-tags --account="$AR_ACCOUNT"
 ```
 
-두 이미지에 `bootstrap` 태그가 표시되면 3-20절으로 진행합니다. 4-1절을 실행할 때 차트 버전이 이미 확인되면 차트 업로드를 건너뜁니다.
+두 이미지에 `bootstrap` 태그가 표시되면 3-20절으로 진행합니다.
 
 <a name="19-2-자동-작업--cloud-build로-bootstrap-이미지-빌드-및-게시"></a>
 
@@ -2312,31 +2315,61 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-https --project="
 
 | 절 | 만드는 것 | 쓰는 곳 |
 |---|---|---|
-| 4-1 | Terraform State 버킷 | `50-workload` 의 과제별 State |
+| 4-1 | Infrastructure Manager 실행 조건 | 5단계 모두, 특히 `50-workload` |
 | 4-2 | StorageClass `sbx-static-pd` | 기존 디스크를 붙이는 정적 PV |
 | 4-3 | 공용 TCP 헬스 체크 | 과제별 백엔드 서비스 |
 | 4-4 | 방화벽 포트 확인 | ALB → Pod `8080-8089` |
 | 4-5 | OAuth 값 등록 | Hub 로그인 (3-13 ~ 3-16 의 Secret) |
 | 4-6 | 기존 과제 프로젝트 권한 | 이전 과제의 Workload Identity · 이미지 · 스냅샷 |
 
-### 4-1. Terraform State 버킷
+### 4-1. Infrastructure Manager 실행 조건
 
-**모든 과제 · 모든 단계의 State 가 이 버킷 한 곳에 있습니다** (`tasks/<과제>/<단계>`). Infrastructure Manager 는 쓰지 않습니다.
+과제의 Terraform 5단계가 모두 Infrastructure Manager 배포로 실행됩니다. **State 는 배포마다 Infrastructure Manager 가 보관**하므로 State 버킷은 만들지 않습니다.
+
+| 배포 이름 | 단계 |
+|---|---|
+| `sbxtest01-<과제>-<해시>-group` | 05-group |
+| `sbxtest01-<과제>-<해시>-project` | 10-project |
+| `sbxtest01-<과제>-<해시>-project-iam` | 30-project-iam |
+| `sbxtest01-<과제>-<해시>-data` | 40-data |
+| `sbxtest01-<과제>-<해시>-workload` | 50-workload (모든 과제) |
+
+`50-workload` 가 GKE 안의 자원을 만들기 때문에 아래 세 가지가 필요합니다.
+
+| 조건 | 이유 | 확인 |
+|---|---|---|
+| Private Pool → `registry.terraform.io` · `releases.hashicorp.com` HTTPS | Kubernetes provider 는 Google 관리 provider 가 아니라 실행할 때 내려받습니다 | 아래 점검 빌드 |
+| Private Pool → GKE DNS 엔드포인트 | Terraform 이 kubeconfig 없이 접근 토큰으로 클러스터에 접속합니다 | [Private Pool GKE 접속 점검](reference/cloudbuild-private-gke-vpn-design.md) |
+| `tf-manager` 의 `roles/container.admin` | Namespace · Pod · PV 생성 | 1-7절 |
 
 ```bash
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT} | 가장 ${TF_MANAGER}
-export TF_STATE_BUCKET="${SBX_GKE_PROJECT}-sbxtest01-tfstate"
-gcloud storage buckets create "gs://${TF_STATE_BUCKET}" --project="${SBX_GKE_PROJECT}" \
-  --location="${REGION}" --uniform-bucket-level-access --public-access-prevention \
-  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
-gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning \
-  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
-gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-  --member="serviceAccount:${TF_MANAGER}" --role=roles/storage.objectAdmin \
-  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
+# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
+# Private Pool 에서 Terraform 레지스트리에 닿는지 확인합니다.
+cat > /tmp/check-registry.yaml <<'YAML'
+steps:
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+  entrypoint: bash
+  args: ["-c", "curl -sSf -o /dev/null -w '%{http_code}\\n' https://registry.terraform.io/v1/providers/hashicorp/kubernetes/versions"]
+options:
+  pool: {name: projects/${SBX_GKE_PROJECT}/locations/${REGION}/workerPools/pool-sbxtest01}
+  logging: CLOUD_LOGGING_ONLY
+YAML
+gcloud builds submit --no-source --config=/tmp/check-registry.yaml \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${ADMIN_ACCOUNT}" \
+  --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"
 ```
 
-State 경로는 `tasks/<과제>/50-workload` 입니다. 버전 관리를 켜 두어 잘못된 적용 뒤 이전 State 로 되돌릴 수 있습니다.
+`200` 이 나오면 됩니다. 막혀 있으면 네트워크 담당자에게 두 도메인의 송신 허용을 요청합니다.
+
+**State 확인**
+
+```bash
+gcloud infra-manager deployments list --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
+  --filter="labels.task=<과제>" --format="table(name.basename(),state,latestRevision.basename())" \
+  --account="${ADMIN_ACCOUNT}"
+gcloud infra-manager deployments export-statefile \
+  "projects/${SBX_GKE_PROJECT}/locations/${REGION}/deployments/<배포 이름>" --account="${ADMIN_ACCOUNT}"
+```
 
 ### 4-2. 정적 PV 용 StorageClass
 
@@ -2386,6 +2419,8 @@ Pod 에서 나가는 방향은 환경에 맞게 따로 엽니다 — 로그인 �
 ### 4-5. OAuth 값 등록
 
 > **테스트 중에는 건너뜁니다.** `provisioner-env.yaml` 의 `HUB_AUTH_MODE: dummy` 이면 로그인 서버 연동이 꺼져 있고 Secret Manager 를 읽지 않습니다. 실제 연동으로 바꿀 때(`oauth`) 이 절을 수행합니다.
+>
+> `oauth` 에서는 `50-workload` 가 Secret Manager 값을 읽어 과제 Namespace 에 Secret 을 만듭니다. **값이 Infrastructure Manager State 에 남으므로** State 를 볼 수 있는 사람을 `tf-manager` 와 관리자로 한정합니다. `tf-manager` 에 두 Secret 의 `roles/secretmanager.secretAccessor` 가 필요합니다.
 
 3-13 ~ 3-16 에서 만든 `jupyter-oauth-client-id` · `jupyter-oauth-client-secret` 을 그대로 씁니다. Runner 가 이 값을 과제 Namespace 의 Secret `hub-oauth` 로 복사하고, Hub 설정은 파일로 읽습니다. **값을 저장소 · 요청 JSON · Terraform 변수에 적지 않습니다.**
 

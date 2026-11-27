@@ -150,7 +150,6 @@ esac
         self.assertEqual(env['REQUEST_BUCKET'], project + '-sbxtest01-requests')
         self.assertEqual(env['BUNDLE_BUCKET'], project + '-sbxtest01-bundles')
         self.assertEqual(env['WORKER_POOL'], f'projects/{project}/locations/asia-northeast3/workerPools/pool-sbxtest01')
-        self.assertEqual(env['TF_STATE_BUCKET'], project + '-sbxtest01-tfstate')
         # Images live in the shared edge project's Artifact Registry.
         self.assertTrue(env['RUNNER_IMAGE_REPO'].startswith('asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/'))
         release = yaml.safe_load((ROOT / '03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml').read_text())

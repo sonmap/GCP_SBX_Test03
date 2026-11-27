@@ -6,9 +6,11 @@ GKE_ENDPOINT_MODE: dns
 WORKER_POOL: projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01
 REQUEST_BUCKET: gcp-sbx-gke01-sbxtest01-requests
 BUNDLE_BUCKET: gcp-sbx-gke01-sbxtest01-bundles
-TF_STATE_BUCKET: gcp-sbx-gke01-sbxtest01-tfstate
 RUNNER_IMAGE_REPO: asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/sbxtest01-automation-runner
 TF_MANAGER_SA: tf-manager
+# Infrastructure Manager 배포 이름 접두사: <접두사>-<과제>-<해시>-<단계>
+DEPLOYMENT_PREFIX: sbxtest01
+TF_VERSION_CONSTRAINT: "1.5.7"
 GITHUB_REPOSITORY: sonmap/GCP_SBX_Test03
 # --- 공유 ALB (1차 구축에서 한 번 생성) ---------------------------------------
 SHARED_URL_MAP_NAME: urlmap-alb-sbxtest01-shared

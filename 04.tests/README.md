@@ -5,7 +5,7 @@ GCP 접속 없이 코드와 설정이 서로 맞는지 확인합니다. 실제 �
 | 파일 | 확인하는 내용 |
 |---|---|
 | `test_provisioning.py` | 요청 형식, 환경 규칙, 변경 불가 값, 단계 선택, 빌드 구성 |
-| `test_workload.py` | 요청 → tfvars 대응, 삭제 차단, `50-workload` 의 디스크 보호 설정 |
+| `test_workload.py` | 요청 → 50-workload 변수 대응, Infrastructure Manager 조건(버전 · backend 없음 · 토큰 접속), `prevent_destroy` |
 | `test_internal_alb.py` | URL Map 규칙 병합(경로 · 호스트 방식), 백엔드 서비스, Workload Identity 확인 |
 | `test_build_paths.py` | Cloud Build 의 Docker 경로 |
 | `test_release_bootstrap.py` | 릴리스 게시 설정 |

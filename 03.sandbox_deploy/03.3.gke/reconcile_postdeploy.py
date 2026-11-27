@@ -292,16 +292,36 @@ def record_applied_request(request_path, request, env):
     gcloud("storage", "cp", str(request_path), f"gs://{bucket}/tasks/{task}/applied-request.json", env=env)
 
 
+def load_request_and_credentials(source, env):
+    """Copy the approved request from GCS and get cluster credentials.
+
+    Terraform ran inside Infrastructure Manager, so this step starts with no
+    local files and no kubeconfig."""
+    request_path = Path("/workspace/approved-request.json")
+    if source.startswith("gs://"):
+        gcloud("storage", "cp", source, str(request_path), env=env)
+    else:
+        request_path = Path(source)
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    gke = request["gke"]
+    gcloud(
+        "container", "clusters", "get-credentials", gke["cluster_name"],
+        f"--project={gke['project_id']}", f"--location={gke['location']}",
+        "--dns-endpoint" if env.get("GKE_ENDPOINT_MODE", "dns") == "dns" else "--internal-ip",
+        env=env,
+    )
+    return request_path, request
+
+
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: reconcile_postdeploy.py APPROVED_REQUEST_JSON")
+        raise SystemExit("usage: reconcile_postdeploy.py APPROVED_REQUEST_(GCS_URI|JSON)")
 
-    request_path = Path(sys.argv[1])
-    request = json.loads(request_path.read_text(encoding="utf-8"))
-    task = request["task"]["name"]
-    project = request["gke"]["project_id"]
     env = dict(os.environ)
     env.pop("CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT", None)
+    request_path, request = load_request_and_credentials(sys.argv[1], env)
+    task = request["task"]["name"]
+    project = request["gke"]["project_id"]
 
     verify_workload_identity(request, env)
 

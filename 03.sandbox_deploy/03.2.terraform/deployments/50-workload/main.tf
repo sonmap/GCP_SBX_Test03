@@ -25,10 +25,15 @@ locals {
 }
 
 # ------------------------------------------------------------------ namespace
+# prevent_destroy on the resources below is the destroy guard: a request whose
+# plan would delete or replace one of them fails before anything changes.
 resource "kubernetes_namespace" "task" {
   metadata {
     name   = var.namespace
     labels = local.labels
+  }
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -42,6 +47,9 @@ resource "kubernetes_service_account" "jupyter" {
       "iam.gke.io/gcp-service-account" = var.jupyter_gsa_email
     }
   }
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Lets <namespace>/<ksa> act as the task's service account. For migrated tasks
@@ -51,6 +59,10 @@ resource "google_service_account_iam_member" "workload_identity" {
   service_account_id = "projects/${var.task_project_id}/serviceAccounts/${var.jupyter_gsa_email}"
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.gke_project_id}.svc.id.goog[${var.namespace}/${var.ksa_name}]"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # ------------------------------------------------------------------ storage
@@ -146,6 +158,26 @@ resource "kubernetes_config_map" "hub_config" {
       data_mount_path    = var.data_mount_path
     })
   }
+}
+
+# ------------------------------------------------------------------ oauth secret
+data "google_secret_manager_secret_version" "oauth" {
+  for_each = local.mount_oauth ? {
+    client_id     = var.oauth_client_id_secret
+    client_secret = var.oauth_client_secret_secret
+  } : {}
+  project = var.gke_project_id
+  secret  = each.value
+}
+
+resource "kubernetes_secret_v1" "hub_oauth" {
+  count = local.mount_oauth ? 1 : 0
+  metadata {
+    name      = "hub-oauth"
+    namespace = kubernetes_namespace.task.metadata[0].name
+    labels    = local.labels
+  }
+  data = { for key, version in data.google_secret_manager_secret_version.oauth : key => version.secret_data }
 }
 
 # ------------------------------------------------------------------ workload
@@ -283,7 +315,7 @@ resource "kubernetes_deployment" "jupyter" {
           content {
             name = "hub-oauth"
             secret {
-              secret_name = var.oauth_secret_name
+              secret_name = kubernetes_secret_v1.hub_oauth[0].metadata[0].name
             }
           }
         }
@@ -323,6 +355,7 @@ resource "kubernetes_service" "jupyter" {
   }
 
   lifecycle {
+    prevent_destroy = true
     # Written by the NEG controller.
     ignore_changes = [metadata[0].annotations["cloud.google.com/neg-status"]]
   }

@@ -1,6 +1,16 @@
 # ---------------------------------------------------------------- platform
-variable "kubeconfig_path" { type = string }
 variable "gke_project_id" { type = string }
+variable "cluster_name" { type = string }
+variable "cluster_location" { type = string }
+
+variable "gke_endpoint_mode" {
+  type    = string
+  default = "dns"
+  validation {
+    condition     = contains(["dns", "internal"], var.gke_endpoint_mode)
+    error_message = "gke_endpoint_mode must be dns or internal."
+  }
+}
 
 variable "wi_impersonate_service_account" {
   type    = string
@@ -117,9 +127,14 @@ variable "hub_admin_users" {
   default = []
 }
 
-# K8s Secret holding client_id / client_secret. Created by the runner from
-# Secret Manager so the values never enter Terraform state.
-variable "oauth_secret_name" {
+# Secret Manager secrets (in the GKE project) copied into the namespace when
+# hub_auth_mode = "oauth". The values are stored in the deployment's state.
+variable "oauth_client_id_secret" {
   type    = string
-  default = "hub-oauth"
+  default = "jupyter-oauth-client-id"
+}
+
+variable "oauth_client_secret_secret" {
+  type    = string
+  default = "jupyter-oauth-client-secret"
 }

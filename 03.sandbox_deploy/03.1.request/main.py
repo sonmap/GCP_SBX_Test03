@@ -21,13 +21,16 @@ REQUEST_RE = re.compile(r"^REQ-[A-Z0-9-]{6,64}$")
 SCHEMA = json.loads(Path(__file__).with_name("sandbox-request.schema.json").read_text())
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
-# stage -> (archive name, short name). The runner applies each with its own
-# state at gs://<TF_STATE_BUCKET>/tasks/<task>/<stage>.
+# stage -> (archive name, Infrastructure Manager deployment suffix).
+# Every stage is one Infrastructure Manager deployment per task, and
+# Infrastructure Manager keeps its state:
+#   projects/<gke project>/locations/<region>/deployments/<prefix>-<task>-<hash>-<suffix>
 STAGES = {
     "05-group": ("group.zip", "group"),
     "10-project": ("project.zip", "project"),
     "30-project-iam": ("project-iam.zip", "project-iam"),
     "40-data": ("data.zip", "data"),
+    "50-workload": ("workload.zip", "workload"),
 }
 # Terraform source layout inside the released sandbox-source.zip.
 SOURCE_DEPLOYMENTS_DIR = "deployments"
@@ -60,7 +63,8 @@ def hub_auth_mode() -> str:
 
 
 def enabled_stages(payload: dict) -> list[str]:
-    """Google Cloud stages this request needs. Migrated tasks usually need none."""
+    """Stages this request applies, in order. 50-workload always runs; the
+    others only when the request manages them (migrated tasks manage none)."""
     stages = []
     if payload["identity"]["manage_group"]:
         stages.append("05-group")
@@ -68,7 +72,59 @@ def enabled_stages(payload: dict) -> list[str]:
         stages.extend(["10-project", "30-project-iam"])
     if payload["data"]["manage"]:
         stages.append("40-data")
+    stages.append("50-workload")
     return stages
+
+
+def deployment_name(payload: dict, stage: str) -> str:
+    prefix = os.environ.get("DEPLOYMENT_PREFIX", "sbx")
+    key = hashlib.sha256(payload["project"]["project_id"].encode()).hexdigest()[:8]
+    return f"{prefix}-{payload['task']['name']}-{key}-{STAGES[stage][1]}"
+
+
+def workload_variables(payload: dict) -> dict:
+    """Inputs of 50-workload. Environment values come from provisioner-env."""
+    task = payload["task"]
+    workload = payload["workload"]
+    storage = workload["storage"]
+    existing_disk = storage.get("existing_disk", "")
+    default_class = os.environ.get("STATIC_STORAGE_CLASS", "sbx-static-pd") if existing_disk else os.environ.get(
+        "DYNAMIC_STORAGE_CLASS", "standard-rwo")
+    return {
+        "gke_project_id": payload["gke"]["project_id"],
+        "cluster_name": payload["gke"]["cluster_name"],
+        "cluster_location": payload["gke"]["location"],
+        "gke_endpoint_mode": os.environ.get("GKE_ENDPOINT_MODE", "dns"),
+        "wi_impersonate_service_account": os.environ.get("WI_IMPERSONATE_SA", ""),
+        "task_name": task["name"],
+        "task_project_id": payload["project"]["project_id"],
+        "area": workload["area"],
+        "namespace": workload["namespace"],
+        "origin": task["origin"],
+        "request_id": payload["request_id"],
+        "jupyter_gsa_email": payload["identity"]["jupyter_gsa"]["email"],
+        "ksa_name": f"ksa-jupyter-{task['name']}",
+        "running": workload["running"],
+        "cpu": workload["cpu"],
+        "memory_gib": workload["memory_gib"],
+        "ephemeral_storage_gib": workload.get("ephemeral_storage_gib", 10),
+        "compute_class": workload.get("compute_class", "Balanced"),
+        "gpu": workload.get("gpu"),
+        "disk_size_gb": storage["size_gb"],
+        "zone": storage["zone"],
+        "existing_disk": existing_disk,
+        "storage_class": storage.get("storage_class", default_class),
+        "containers": [
+            {key: item[key] for key in ("name", "image", "hub_port", "host", "base_path", "command", "args")
+             if key in item}
+            for item in workload["containers"]
+        ],
+        "hub_config_managed": workload.get("hub_config", "MANAGED") == "MANAGED",
+        "hub_auth_mode": hub_auth_mode(),
+        "hub_oauth_base_url": os.environ.get("HUB_OAUTH_BASE_URL", ""),
+        "portal_members_api": os.environ.get("PORTAL_MEMBERS_API", ""),
+        "hub_admin_users": env_list("HUB_ADMIN_USERS"),
+    }
 
 
 def parse_gs_uri(uri: str) -> tuple[str, str]:
@@ -287,6 +343,7 @@ def stage_variables(payload: dict) -> dict[str, dict]:
             "create_jupyter_gsa": identity["jupyter_gsa"]["create"],
             "datalake_datasets": data.get("datalake_datasets", []),
         },
+        "50-workload": workload_variables(payload),
     }
 
 
@@ -363,11 +420,9 @@ def assemble_bundles(payload: dict, raw_request: bytes) -> tuple[str, dict]:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
-        stages = enabled_stages(payload)
-        if stages:
-            source_root = download_source_archive(payload["source"], temp / "source")
-            deployment_root = source_root / SOURCE_DEPLOYMENTS_DIR
-        for stage in stages:
+        source_root = download_source_archive(payload["source"], temp / "source")
+        deployment_root = source_root / SOURCE_DEPLOYMENTS_DIR
+        for stage in enabled_stages(payload):
             archive_name = STAGES[stage][0]
             source = deployment_root / stage
             if not source.is_dir():
@@ -399,54 +454,68 @@ def assemble_bundles(payload: dict, raw_request: bytes) -> tuple[str, dict]:
 
 
 def start_build(payload: dict, request_uri: str, bundle_prefix: str):
-    """One Cloud Build on the private pool, two steps, both in the runner image:
-    Terraform for every stage (one state location), then the ALB attachment."""
+    """One Cloud Build on the private pool:
+      step terraform : Infrastructure Manager apply for each stage, in order
+      step alb       : runner image attaches the task to the shared ALB
+    """
     project = os.environ["SBX_GKE_PROJECT"]
     region = os.environ["GCP_REGION"]
+    task = payload["task"]["name"]
+    request_id = payload["request_id"]
     release_id = payload["source"]["release_id"]
     worker_pool = os.environ["WORKER_POOL"]
     tf_manager = f"{os.environ.get('TF_MANAGER_SA', 'tf-manager')}@{project}.iam.gserviceaccount.com"
     service_account = f"projects/{project}/serviceAccounts/{tf_manager}"
 
-    # The runner image tag equals the approved release, so the Terraform code
-    # and providers cannot drift under an approved request.
+    commands = ["set -euo pipefail"]
+    for stage in enabled_stages(payload):
+        archive = STAGES[stage][0]
+        commands.append(
+            "gcloud infra-manager deployments apply "
+            f"\"projects/{project}/locations/{region}/deployments/{deployment_name(payload, stage)}\" "
+            f"--service-account=\"{service_account}\" "
+            f"--gcs-source=\"{bundle_prefix}/{archive}\" "
+            f"--worker-pool=\"{worker_pool}\" "
+            f"--tf-version-constraint=\"{os.environ.get('TF_VERSION_CONSTRAINT', '1.5.7')}\" "
+            "--provider-source=SERVICE_MAINTAINED "
+            f"--labels=\"task={task},stage={STAGES[stage][1]}\" "
+            f"--annotations=\"request_id={request_id}\" "
+            "--quiet"
+        )
+        if stage == "05-group":
+            # Group visibility in IAM may lag creation. Failures stop the build.
+            commands.append("sleep 60")
+
     runner_image = f"{os.environ['RUNNER_IMAGE_REPO']}:{release_id}"
     env = [
         f"SBX_GKE_PROJECT={project}",
         f"GCP_REGION={region}",
         f"BUNDLE_BUCKET={os.environ['BUNDLE_BUCKET']}",
-        f"TF_STATE_BUCKET={os.environ['TF_STATE_BUCKET']}",
         f"SHARED_URL_MAP_NAME={os.environ['SHARED_URL_MAP_NAME']}",
         f"SHARED_HEALTH_CHECK_NAME={os.environ['SHARED_HEALTH_CHECK_NAME']}",
-        f"HUB_AUTH_MODE={hub_auth_mode()}",
-        f"HUB_OAUTH_BASE_URL={os.environ.get('HUB_OAUTH_BASE_URL', '')}",
-        f"PORTAL_MEMBERS_API={os.environ.get('PORTAL_MEMBERS_API', '')}",
-        f"HUB_ADMIN_USERS={os.environ.get('HUB_ADMIN_USERS', '')}",
-        f"WI_IMPERSONATE_SA={os.environ.get('WI_IMPERSONATE_SA', '')}",
+        f"GKE_ENDPOINT_MODE={os.environ.get('GKE_ENDPOINT_MODE', 'dns')}",
         "KUBECONFIG=/workspace/kubeconfig",
-        f"GKE_ENDPOINT_MODE={os.environ.get('GKE_ENDPOINT_MODE', 'internal')}",
     ]
     build_spec = {
         "steps": [
             {
                 "id": "terraform",
-                "name": runner_image,
-                "entrypoint": "python3",
-                "args": ["/opt/sandbox/run_terraform.py", f"{bundle_prefix}/approved-request.json"],
-                "env": env,
+                "name": "gcr.io/google.com/cloudsdktool/cloud-sdk:slim",
+                "entrypoint": "bash",
+                "args": ["-ceu", "\n".join(commands)],
             },
             {
                 "id": "alb",
                 "name": runner_image,
                 "entrypoint": "python3",
-                "args": ["/opt/sandbox/reconcile_postdeploy.py", "/workspace/approved-request.json"],
+                "args": ["/opt/sandbox/reconcile_postdeploy.py", f"{bundle_prefix}/approved-request.json"],
                 "env": env,
             },
         ],
         "options": {"logging": "CLOUD_LOGGING_ONLY", "pool": {"name": worker_pool}},
         "service_account": service_account,
         "timeout": "7200s",
-        "tags": [f"task-{payload['task']['name']}", payload["request_id"].lower()[:128]],
+        "tags": [f"task-{task}", request_id.lower()[:128]],
     }
     build = cloudbuild_v1.Build(build_spec)
     client = cloudbuild_v1.CloudBuildClient(
