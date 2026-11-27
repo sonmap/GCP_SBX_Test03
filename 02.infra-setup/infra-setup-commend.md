@@ -57,7 +57,7 @@ export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"   # Shared VPC
 ```bash
 unset CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT
 export ADMIN_ACCOUNT=user01@sonmap.net
-# 실행 프로젝트 작업자는 son, Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
+# 실행 프로젝트 작업자는 user01(그룹 pgrp-gcp-sbx01), Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
 export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
@@ -141,7 +141,7 @@ flowchart TD
 # 아래 값을 확인하고 이 블록부터 같은 터미널에서 실행합니다.
 unset CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT
 export ADMIN_ACCOUNT=user01@sonmap.net
-# 실행 프로젝트 작업자는 son, Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
+# 실행 프로젝트 작업자는 user01(그룹 pgrp-gcp-sbx01), Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
 export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
@@ -1355,7 +1355,7 @@ flowchart TD
 # 아래 값을 확인하고 이 블록부터 같은 터미널에서 실행합니다.
 unset CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT
 export ADMIN_ACCOUNT=user01@sonmap.net
-# 실행 프로젝트 작업자는 son, Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
+# 실행 프로젝트 작업자는 user01(그룹 pgrp-gcp-sbx01), Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
 export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
