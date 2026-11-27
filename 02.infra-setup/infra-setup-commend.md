@@ -262,9 +262,11 @@ gcloud services enable container.googleapis.com compute.googleapis.com iam.googl
 
 ### 1-2. Google 서비스 에이전트 준비 — API별로 필요한 시스템 계정
 
+> **Cloud Shell 에서 실행합니다.** `gcloud beta services identity create` 는 Service Usage 의 beta API 를 쓰는데, `infra-son01` 처럼 `restricted.googleapis.com` 으로 나가는 VM 에서는 `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` 로 거부됩니다. Cloud Shell 에서 0-1 변수 블록을 다시 실행한 뒤 아래 블록을 실행합니다. 프로젝트 번호가 비어 있으면 `service-@…` 계정 오류가 나므로 첫 줄에서 확인합니다.
+
 ```bash
-# [infra-son01] 플랫폼 운영자 · 대상 ${SBX_GKE_PROJECT}
-# 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
+# 실행 위치 Cloud Shell | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
+[[ "${SBX_GKE_PROJECT_NUMBER}" =~ ^[0-9]+$ ]] || { echo "SBX_GKE_PROJECT_NUMBER 가 비어 있습니다. 0-1 을 다시 실행하세요."; return 1 2>/dev/null || exit 1; }
 gcloud beta services identity create --service=cloudbuild.googleapis.com \
   --project="${SBX_GKE_PROJECT}" --account="${ADMIN_ACCOUNT}"
 gcloud beta services identity create --service=servicenetworking.googleapis.com \
