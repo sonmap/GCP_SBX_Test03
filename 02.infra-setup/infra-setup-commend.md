@@ -2373,7 +2373,22 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
 
 ### 3-19. Bootstrap 이미지 빌드 및 AR 게시
 
-**3-19-1 수동 작업** 또는 **3-19-2 자동 작업** 중 하나를 선택합니다. 이번 구축은 **3-19-1 수동 작업**으로 진행합니다. 두 경로 모두 같은 `:bootstrap` 이미지 2개를 게시한 뒤 3-20절으로 진행합니다.
+**3-19-1 수동** 과 **3-19-2 자동** 은 결과가 같습니다. 둘 다 같은 이름 · 같은 `:bootstrap` 태그의 이미지 2개를 edge AR 에 올립니다. **하나만 하면 되고, 둘 다 하면 뒤의 것이 앞의 것을 덮어씁니다.** 3-19-1 이 성공했으면 3-19-2 는 건너뛰고 3-20 으로 갑니다.
+
+| | 3-19-1 수동 | 3-19-2 자동 |
+|---|---|---|
+| 빌드 위치 | `infra-son01` 의 Docker | Cloud Build 기본 풀 (Google 관리, 인터넷 가능) |
+| 필요한 것 | VM 의 Docker, VM 에서 apt · pip 다운로드 가능 | 빌드 소스 버킷(3-1 ~ 3-9), `tf-manager` 의 AR 쓰기 권한(3-11) |
+| 언제 | VM 에서 빌드가 되면 | VM 에 Docker 가 없거나, VM 에서 패키지 다운로드가 막혀 3-19-1 빌드가 실패하면 |
+
+이미지 2개는 다음과 같습니다.
+
+| 이미지 | 쓰는 곳 |
+|---|---|
+| `…/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap` | 3-17-3 · 4-1 의 Private Pool 점검 빌드 |
+| `…/ar-sbxtest01-platform/run-sbxtest01-provisioner:bootstrap` | 3-20 Cloud Run 첫 배포 |
+
+과제 배포 때는 이 `:bootstrap` 이 아니라 2차 문서의 릴리스 게시(`platform-release.yaml`)로 만든 `:git-<커밋>` 태그 이미지를 씁니다.
 
 <a name="19-1-수동-작업--infra-son01에서-helm-차트-반입-및-이미지-빌드"></a>
 
