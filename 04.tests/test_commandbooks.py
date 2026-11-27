@@ -189,6 +189,17 @@ class CommandHeaderTests(unittest.TestCase):
                 self.assertIn(field, header, header)
             self.assertNotIn('${', header, header)
 
+    def test_every_bash_block_declares_the_variables_it_uses(self):
+        """A block must run on its own: no reliance on variables from earlier sections."""
+        text = (ROOT / '02.infra-setup/infra-setup-commend.md').read_text()
+        for block in re.findall(r'```bash\n(.*?)```', text, re.S):
+            code = '\n'.join(line for line in block.splitlines() if not line.strip().startswith('#'))
+            declared = set(re.findall(r'^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=', code, re.M))
+            declared |= set(re.findall(r'read -rs? ([A-Z_]+)', code))
+            declared |= set(re.findall(r'\bfor ([A-Z][A-Z0-9_]*) in', code))
+            used = set(re.findall(r'\$\{?([A-Z][A-Z0-9_]*)', code)) - {'HOME', 'PATH', 'PWD'}
+            self.assertEqual(used - declared, set(), block[:160])
+
 
 if __name__ == '__main__':
     unittest.main()
