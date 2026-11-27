@@ -5,16 +5,16 @@ steps:
   - -f
   - 03.sandbox_deploy/03.3.gke/Dockerfile
   - -t
-  - asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap
+  - asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap
   - .
 - name: gcr.io/cloud-builders/docker
   args:
   - build
   - -t
-  - asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/run-sbxtest01-provisioner:bootstrap
+  - asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/run-sbxtest01-provisioner:bootstrap
   - 03.sandbox_deploy/03.1.request
 images:
-- asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap
-- asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/run-sbxtest01-provisioner:bootstrap
+- asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap
+- asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/run-sbxtest01-provisioner:bootstrap
 options:
   logging: CLOUD_LOGGING_ONLY

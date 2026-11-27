@@ -2,17 +2,17 @@
 # Run after bootstrap-build has published the :bootstrap runner image.
 # Usage and success criteria: 02.infra-setup/reference/cloudbuild-private-gke-vpn-design.md
 steps:
-  - name: asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap
+  - name: asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/sbxtest01-automation-runner:bootstrap
     entrypoint: bash
     env:
       - KUBECONFIG=/workspace/kubeconfig
     args:
       - -ceu
       - |
-        gcloud container clusters get-credentials gke-sbx-main-an3 --project=gcp-sbx-edp-gke01 --location=asia-northeast3 --dns-endpoint
+        gcloud container clusters get-credentials gke-sbx-main-an3 --project=gcp-sbx-gke01 --location=asia-northeast3 --dns-endpoint
         kubectl --request-timeout=20s get namespaces
 options:
   logging: CLOUD_LOGGING_ONLY
   pool:
-    name: projects/gcp-sbx-edp-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01
+    name: projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01
 timeout: 300s

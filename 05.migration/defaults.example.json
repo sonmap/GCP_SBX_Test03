@@ -4,13 +4,13 @@
   "host_template": "sbx.sonmap.net",
   "base_path_template": "/{area}/{task}/",
   "gke": {
-    "project_id": "gcp-sbx-edp-gke01",
+    "project_id": "gcp-sbx-gke01",
     "cluster_name": "gke-sbx-main-an3",
     "location": "asia-northeast3"
   },
   "source": {
     "release_id": "git-000000000000",
-    "archive_uri": "gs://gcp-sbx-edp-gke01-sbxtest01-bundles/platform-releases/git-000000000000/sandbox-source.zip",
+    "archive_uri": "gs://gcp-sbx-gke01-sbxtest01-bundles/platform-releases/git-000000000000/sandbox-source.zip",
     "generation": 1,
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }

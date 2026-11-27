@@ -45,7 +45,7 @@
     ]
   },
   "gke": {
-    "project_id": "gcp-sbx-edp-gke01",
+    "project_id": "gcp-sbx-gke01",
     "cluster_name": "gke-sbx-main-an3",
     "location": "asia-northeast3"
   },
@@ -62,7 +62,7 @@
     "containers": [
       {
         "name": "jupyter",
-        "image": "asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform/sbx03-jupyter@sha256:abababababababababababababababababababababababababababababababab",
+        "image": "asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform/sbx03-jupyter@sha256:abababababababababababababababababababababababababababababababab",
         "hub_port": 8081,
         "host": "sbx.sonmap.net",
         "base_path": "/general/sbx03/"
@@ -71,7 +71,7 @@
   },
   "source": {
     "release_id": "git-000000000000",
-    "archive_uri": "gs://gcp-sbx-edp-gke01-sbxtest01-bundles/platform-releases/git-000000000000/sandbox-source.zip",
+    "archive_uri": "gs://gcp-sbx-gke01-sbxtest01-bundles/platform-releases/git-000000000000/sandbox-source.zip",
     "generation": 1,
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }

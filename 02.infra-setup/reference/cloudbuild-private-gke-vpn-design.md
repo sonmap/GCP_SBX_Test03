@@ -24,9 +24,9 @@ Namespace 목록만 조회하는 점검입니다. 운영 VM의 kubeconfig와 Kub
 ```bash
 gcloud builds submit --no-source \
   --config=02.infra-setup/reference/check-private-gke.yaml \
-  --project=gcp-sbx-edp-gke01 --region=asia-northeast3 \
+  --project=gcp-sbx-gke01 --region=asia-northeast3 \
   --account=son@sonmap.net \
-  --service-account=projects/gcp-sbx-edp-gke01/serviceAccounts/tf-manager@gcp-sbx-edp-gke01.iam.gserviceaccount.com
+  --service-account=projects/gcp-sbx-gke01/serviceAccounts/tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com
 ```
 
 **통과 기준은 빌드 상태 `SUCCESS`와 로그의 Namespace 목록입니다.** 제출 결과에서 Build ID를 확인하고, 빌드 상세 화면에서 Cloud Logging 로그를 확인합니다. 관리 VM에서의 `kubectl` 성공과 별개로 이 빌드의 결과를 확인합니다.

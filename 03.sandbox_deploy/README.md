@@ -35,7 +35,7 @@ flowchart LR
 ## 0. 변수
 
 ```bash
-export SBX_GKE_PROJECT="gcp-sbx-edp-gke01"
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export ADMIN_ACCOUNT="son@sonmap.net"
 export REGION="asia-northeast3"
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"

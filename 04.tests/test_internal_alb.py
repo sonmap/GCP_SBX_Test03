@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("reconcile", ROOT / "03.sandbox_deploy/03.3.gke/reconcile_postdeploy.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-PROJECT = "gcp-sbx-edp-gke01"
+PROJECT = "gcp-sbx-gke01"
 REGION = "asia-northeast3"
 ENV = {"GCP_REGION": REGION}
 DEFAULT = f"projects/{PROJECT}/regions/{REGION}/backendServices/bes-default"

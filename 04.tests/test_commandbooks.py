@@ -35,11 +35,11 @@ class CommandbookTests(unittest.TestCase):
     def test_private_check_runs_directly_with_current_project(self):
         check = yaml.safe_load((ROOT / '02.infra-setup/reference/check-private-gke.yaml').read_text())
         self.assertEqual(check['options']['pool']['name'],
-            'projects/gcp-sbx-edp-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01')
+            'projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01')
         step = check['steps'][0]
         self.assertTrue(step['name'].startswith(
-            'asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/'))
-        self.assertIn('--project=gcp-sbx-edp-gke01', step['args'][-1])
+            'asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/'))
+        self.assertIn('--project=gcp-sbx-gke01', step['args'][-1])
         self.assertIn('--dns-endpoint', step['args'][-1])
 
     def test_current_network_defaults_and_runtime_schema_agree(self):
@@ -99,11 +99,11 @@ esac
             creates = [c for c in calls if c.startswith('iam service-accounts create ')]
             self.assertEqual(len(creates), 2)
             self.assertTrue(any('create sbx-manager ' in c for c in creates))
-            self.assertTrue(any('create tf-manager ' in c and '--project=gcp-sbx-edp-gke01' in c for c in creates))
-            self.assertTrue(any('create sbx-manager ' in c and '--project=gcp-sbx-edp-gke01' in c for c in creates))
+            self.assertTrue(any('create tf-manager ' in c and '--project=gcp-sbx-gke01' in c for c in creates))
+            self.assertTrue(any('create sbx-manager ' in c and '--project=gcp-sbx-gke01' in c for c in creates))
             account_calls=[c for c in calls if c.startswith('iam service-accounts ') and ' tf-manager@' in c]
             self.assertTrue(account_calls)
-            self.assertTrue(all('--project=gcp-sbx-edp-gke01' in c for c in account_calls))
+            self.assertTrue(all('--project=gcp-sbx-gke01' in c for c in account_calls))
             self.assertFalse(any('iam.disableCrossProjectServiceAccountUsage' in c for c in calls))
             self.assertIn('_RELEASE_ID=git-$SHORT_SHA,_COMMIT_SHA=$COMMIT_SHA', '\n'.join(blocks(FOUNDATION_SECTIONS[3])))
             self.assertFalse(any('${' in c for c in calls))
@@ -124,7 +124,7 @@ esac
             self.assertEqual(sum('add-iam-policy-binding subnet-prod-sbx-gke-01 ' in c for c in subnet_grants),3)
             vip_grants=[c for c in subnet_grants if 'add-iam-policy-binding subnet-prod-edp-alb-frontend-an3 ' in c]
             self.assertEqual(len(vip_grants),1)
-            self.assertIn('tf-manager@gcp-sbx-edp-gke01.iam.gserviceaccount.com',vip_grants[0])
+            self.assertIn('tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com',vip_grants[0])
             host_grants=[c for c in calls if c.startswith('projects add-iam-policy-binding gcp-prod-edp-hub-vpchost ')]
             self.assertFalse(any('--role=roles/compute.networkUser ' in c for c in host_grants))
             for role in ['compute.networkAdmin','compute.securityAdmin','servicenetworking.networksAdmin']:
@@ -133,9 +133,9 @@ esac
 
     def test_static_configs_match_runtime_targets_and_reference_files_exist(self):
         env = yaml.safe_load((ROOT / '03.sandbox_deploy/03.1.request/provisioner-env.yaml').read_text())
-        self.assertEqual(env['SBX_GKE_PROJECT'], 'gcp-sbx-edp-gke01')
+        self.assertEqual(env['SBX_GKE_PROJECT'], 'gcp-sbx-gke01')
         self.assertEqual(env['GKE_ENDPOINT_MODE'], 'dns')
-        self.assertEqual(env['SBX_GKE_PROJECT'], 'gcp-sbx-edp-gke01')
+        self.assertEqual(env['SBX_GKE_PROJECT'], 'gcp-sbx-gke01')
         build = yaml.safe_load((ROOT / '03.sandbox_deploy/03.3.gke/cloudbuild/bootstrap-build.yaml').read_text())
         self.assertEqual(build['options']['logging'], 'CLOUD_LOGGING_ONLY')
         self.assertEqual(len(build['images']), 2)
@@ -146,7 +146,7 @@ esac
     def test_unified_platform_endpoints(self):
         env = yaml.safe_load((ROOT / '03.sandbox_deploy/03.1.request/provisioner-env.yaml').read_text())
         project = env['SBX_GKE_PROJECT']
-        self.assertEqual(project, 'gcp-sbx-edp-gke01')
+        self.assertEqual(project, 'gcp-sbx-gke01')
         self.assertEqual(env['REQUEST_BUCKET'], project + '-sbxtest01-requests')
         self.assertEqual(env['BUNDLE_BUCKET'], project + '-sbxtest01-bundles')
         self.assertEqual(env['WORKER_POOL'], f'projects/{project}/locations/asia-northeast3/workerPools/pool-sbxtest01')

@@ -24,7 +24,7 @@ flowchart LR
 ./05.migration/01_inventory.sh projects.txt > inventory.csv
 
 ./05.migration/02_snapshot_to_disk.sh rsch gcp-sbx-edp-rsch vm-sbx-rsch-notebook-4 \
-  asia-northeast3-a <data 디스크 이름> gcp-sbx-edp-gke01
+  asia-northeast3-a <data 디스크 이름> gcp-sbx-gke01
 
 ./05.migration/03_make_request.py --defaults 05.migration/defaults.example.json \
   --task rsch --project gcp-sbx-edp-rsch --area general \

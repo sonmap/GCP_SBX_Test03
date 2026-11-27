@@ -1,14 +1,14 @@
 """Synthetic request data (schema 2.0) for local tests."""
 
 DIGEST = "sha256:" + "ab" * 32
-REGISTRY = "asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/ar-sbxtest01-platform"
+REGISTRY = "asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/ar-sbxtest01-platform"
 ENV = {
-    "SBX_GKE_PROJECT": "gcp-sbx-edp-gke01", "GCP_REGION": "asia-northeast3",
+    "SBX_GKE_PROJECT": "gcp-sbx-gke01", "GCP_REGION": "asia-northeast3",
     "GKE_CLUSTER_NAME": "gke-sbx-main-an3",
-    "BUNDLE_BUCKET": "gcp-sbx-edp-gke01-sbxtest01-bundles",
-    "REQUEST_BUCKET": "gcp-sbx-edp-gke01-sbxtest01-requests",
-    "TF_STATE_BUCKET": "gcp-sbx-edp-gke01-sbxtest01-tfstate",
-    "WORKER_POOL": "projects/gcp-sbx-edp-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01",
+    "BUNDLE_BUCKET": "gcp-sbx-gke01-sbxtest01-bundles",
+    "REQUEST_BUCKET": "gcp-sbx-gke01-sbxtest01-requests",
+    "TF_STATE_BUCKET": "gcp-sbx-gke01-sbxtest01-tfstate",
+    "WORKER_POOL": "projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01",
     "RUNNER_IMAGE_REPO": REGISTRY + "/sbxtest01-automation-runner",
     "DEPLOYMENT_PREFIX": "sbxtest01",
     "SHARED_URL_MAP_NAME": "urlmap-alb-sbxtest01-shared",
@@ -19,7 +19,7 @@ ENV = {
     "NAMESPACE_TEMPLATE": "sbx-{area}-{task}",
     "ALLOWED_AREAS": "general,anonymous,common,sa",
     "JUPYTER_HOST_SUFFIXES": ".sonmap.net",
-    "IMAGE_REGISTRY_PREFIXES": "asia-northeast3-docker.pkg.dev/gcp-sbx-edp-gke01/",
+    "IMAGE_REGISTRY_PREFIXES": "asia-northeast3-docker.pkg.dev/gcp-sbx-gke01/",
     "DATALAKE_PROJECTS": "pjt-c-admin",
 }
 
@@ -46,7 +46,7 @@ def make_request(*, migrated=False, containers=1):
         },
         "project": {"manage": not migrated, "project_id": project},
         "data": {"manage": not migrated},
-        "gke": {"project_id": "gcp-sbx-edp-gke01", "cluster_name": "gke-sbx-main-an3", "location": "asia-northeast3"},
+        "gke": {"project_id": "gcp-sbx-gke01", "cluster_name": "gke-sbx-main-an3", "location": "asia-northeast3"},
         "workload": {
             "area": area, "namespace": f"sbx-{area}-{task}", "running": True,
             "cpu": 8, "memory_gib": 64,
@@ -61,7 +61,7 @@ def make_request(*, migrated=False, containers=1):
         },
         "source": {
             "release_id": "git-test123",
-            "archive_uri": "gs://gcp-sbx-edp-gke01-sbxtest01-bundles/platform-releases/git-test123/sandbox-source.zip",
+            "archive_uri": "gs://gcp-sbx-gke01-sbxtest01-bundles/platform-releases/git-test123/sandbox-source.zip",
             "generation": 1, "sha256": "a" * 64,
         },
     }
