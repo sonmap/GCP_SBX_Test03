@@ -175,5 +175,20 @@ esac
         self.assertIn('--clear-network',rollout['args'][-1])
 
 
+class CommandHeaderTests(unittest.TestCase):
+    """Every command block states where to run it, what it targets and as whom."""
+
+    def test_every_bash_block_has_location_target_account(self):
+        text = (ROOT / '02.infra-setup/infra-setup-commend.md').read_text()
+        blocks = re.findall(r'```bash\n(.*?)```', text, re.S)
+        self.assertGreater(len(blocks), 100)
+        for block in blocks:
+            header = next((line for line in block.splitlines() if '실행 위치:' in line), None)
+            self.assertIsNotNone(header, block[:120])
+            for field in ('대상:', '실행 계정:'):
+                self.assertIn(field, header, header)
+            self.assertNotIn('${', header, header)
+
+
 if __name__ == '__main__':
     unittest.main()
