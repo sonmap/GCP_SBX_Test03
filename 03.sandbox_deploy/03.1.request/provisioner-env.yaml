@@ -16,7 +16,8 @@ GITHUB_REPOSITORY: sonmap/GCP_SBX_Test03
 SHARED_URL_MAP_NAME: urlmap-alb-sbxtest01-shared
 SHARED_HEALTH_CHECK_NAME: hc-sbxtest01-jupyter-tcp
 # --- 이름·허용 규칙 (환경마다 다른 값) -----------------------------------------
-CLOUD_IDENTITY_CUSTOMER_ID: __SET_CUSTOMER_ID__
+# sonmap.net Workspace 고객 ID. 명령서 1-8 끝에서 조회한 값과 같아야 합니다.
+CLOUD_IDENTITY_CUSTOMER_ID: C03rw3vtp
 GROUP_EMAIL_TEMPLATE: "pgrp-gcp-dev-{task}@sonmap.net"
 MEMBER_EMAIL_DOMAINS: sonmap.net
 NAMESPACE_TEMPLATE: "sbx-{area}-{task}"

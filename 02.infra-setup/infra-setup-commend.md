@@ -18,13 +18,29 @@
 
 각 대제목 아래의 **내용 펼치기 / 접기**를 눌러 명령과 설명을 볼 수 있습니다.
 
-| 단계 | 명령과 확인 절차 |
-|---|---|
-| 준비 | [공통 변수](#0-공통-변수) |
-| 공통 인프라 | [API·IAM](#1-api와-관리자-권한) → [Shared VPC](#2-shared-vpc와-네트워크) → [서브넷 IAM](#2-2-서브넷별-iam) → [GKE·AR·ALB](#3-공통-기반) |
-| 과제 Pod 실행 준비 | [State 버킷 · StorageClass · 헬스 체크 · OAuth 값 · 기존 과제 권한](#4-과제-pod-실행-준비) |
-| 기존 과제별 자동 배포 준비 | [Workspace 그룹스 관리자 역할](#1-4-2-google-workspace-그룹스-관리자-역할-부여) · [Workspace 고객 ID](#5-기존-과제별-자동-배포용-workspace-설정) · [Private Pool 점검](reference/cloudbuild-private-gke-vpn-design.md) |
-| 2차 배포 | [과제 자동화](../03.sandbox_deploy/README.md) · [기존 과제 이전](../05.migration/README.md) |
+**위에서부터 순서대로 실행합니다.** 뒤 절이 앞 절의 결과를 씁니다.
+
+| 순서 | 절 | 내용 | 실행 위치 | 계정 |
+|---|---|---|---|---|
+| 1 | 0-0 | 프로젝트 확인, 작업 그룹 권한 | `infra-son01` | admin |
+| 2 | 0-1 · 0-2 | 변수 선언, 조회 확인 (새 터미널마다 0-1 다시) | `infra-son01` | user01 |
+| 3 | 1-1 | API 활성화 | `infra-son01` | user01 |
+| 4 | 1-2 | 서비스 에이전트 생성 | **Cloud Shell** | **admin** |
+| 5 | 1-3 | `sbx-manager` · `tf-manager` 생성 | `infra-son01` | user01 |
+| 6 | 1-4-1 | `tf-manager` 프로젝트 권한 | `infra-son01` | user01 |
+| 7 | 1-4-2 | `tf-manager` 에 Workspace 그룹스 관리자 역할 | **admin.google.com** | 최고 관리자 |
+| 8 | 1-5 ~ 1-7 | `sbx-manager` · `tf-manager` 나머지 권한 | `infra-son01` | user01 (1-6 은 admin) |
+| 9 | 1-8 | 가장 권한 + **확인 3가지** (가장 · 그룹 조회 · 고객 ID) | `infra-son01` | user01 |
+| 10 | 1-9 ~ 1-12 | 폴더 권한, GKE 노드 계정, (선택) 결제 | `infra-son01` | admin · user01 |
+| 11 | 2장 | 서브넷 · 방화벽 · 서브넷 IAM · PSA · Private Google Access | `infra-son01` | admin (호스트 프로젝트) |
+| 12 | 3-1 ~ 3-9 | 버킷 3개와 권한 | `infra-son01` | user01 → `tf-manager` 가장 |
+| 13 | 3-10 ~ 3-12 | edge AR 확인, AR 권한 | Cloud Shell | edge 프로젝트 관리자 |
+| 14 | 3-13 ~ 3-16 | OAuth Secret — **테스트 중 건너뜀** | | |
+| 15 | 3-17 ~ 3-18 | Private Pool, GKE 클러스터 | `infra-son01` | admin · user01 |
+| 16 | 3-19 ~ 3-26 | 이미지 빌드, Cloud Run, Workflow | `infra-son01` | user01 → `tf-manager` 가장 |
+| 17 | 3-27 ~ | 내부 ALB, 인증서 | `infra-son01` | user01 → `tf-manager` 가장 |
+| 18 | 4장 | Infrastructure Manager 조건 점검, StorageClass, 헬스 체크 (4-5 건너뜀) | `infra-son01` | user01 |
+| 19 | 다음 문서 | [2차 과제 자동화](../03.sandbox_deploy/README.md) · [기존 과제 이전](../05.migration/README.md) | | |
 
 기존 환경에서는 자원 조회 결과를 확인한 뒤 필요한 생성·갱신 명령만 실행합니다.
 
@@ -214,37 +230,6 @@ export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe "${SBX_GKE_PROJECT}" -
 <a name="-1-필요한-api-활성화--cicd--shared-vpc-host--gke-프로젝트"></a>
 
 <a name="1-필요한-api-활성화--cicd--shared-vpc-host--gke-프로젝트"></a>
-
-### 1-0. 작업 그룹 권한 — pgrp-gcp-sbx01
-
-> 0-0 에서 이미 실행했다면 건너뜁니다. 아래는 같은 내용의 상세 설명입니다.
-
-작업자 `user01@sonmap.net` 은 개인이 아니라 **그룹 `pgrp-gcp-sbx01@sonmap.net`** 으로 권한을 받습니다. 역할은 운영 환경 l2comn 관리 그룹과 같은 목록이며 [grant-operator-group.sh](grant-operator-group.sh) 에 이름으로 적혀 있습니다. 스크립트가 이름으로 역할 ID 를 찾고, 찾지 못한 역할은 부여하지 않고 표시합니다.
-
-```bash
-# 실행 위치 Cloud Shell 또는 infra-son01 | 대상 gcp-sbx-gke01 | 계정 프로젝트 IAM 관리자 (admin@sonmap.net)
-export SBX_GKE_PROJECT=gcp-sbx-gke01
-export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
-export IAM_ADMIN_ACCOUNT=admin@sonmap.net
-
-./02.infra-setup/grant-operator-group.sh            # 1) 계획 확인
-./02.infra-setup/grant-operator-group.sh --apply    # 2) 부여
-```
-
-작업자는 자기 계정으로 로그인해 확인합니다. 그룹 권한은 반영까지 몇 분 걸릴 수 있습니다.
-
-```bash
-gcloud auth login user01@sonmap.net
-gcloud config set project gcp-sbx-gke01
-gcloud projects get-iam-policy gcp-sbx-gke01 --flatten=bindings \
-  --filter="bindings.members:group:pgrp-gcp-sbx01@sonmap.net" --format='value(bindings.role)'
-```
-
-**이 목록에 없는데 Test03 작업에 필요한 권한** — 1-8절에서 `OPERATOR_MEMBER` 에 부여합니다.
-
-| 역할 | 이유 |
-|---|---|
-| `tf-manager` · `sbx-manager` 에 Service Account Token Creator | 명령서는 대부분 `--impersonate-service-account=tf-manager` 로 실행합니다. Service Account User 만으로는 가장할 수 없습니다. |
 
 ### 1-1. 필요한 API 활성화 — CI/CD · Shared VPC Host · GKE 프로젝트
 
@@ -547,6 +532,15 @@ gcloud identity groups search --customer="${CUSTOMER_ID}" \
 | `getAccessToken denied` | 위 가장 확인부터 다시 |
 | `PERMISSION_DENIED` (groups.search) | 1-4-2 의 역할 할당이 아직 반영되지 않음. 몇 분 뒤 재시도, 그래도 안 되면 1-4-2 의 관리자 목록에 `tf-manager` 가 있는지 확인 |
 | `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` | 이 VM 경로에서 Cloud Identity API 가 막힘. Cloud Shell 에서 `gcloud auth login user01@sonmap.net` 후 같은 블록을 실행 (변수 `ADMIN_ACCOUNT=user01@sonmap.net`, `TF_MANAGER=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com` 먼저 지정) |
+
+3) 저장소에 적힌 고객 ID 와 같은지 확인합니다. Provisioner 가 이 값으로 Workspace 디렉터리를 지정합니다.
+
+```bash
+grep '^CLOUD_IDENTITY_CUSTOMER_ID:' 03.sandbox_deploy/03.1.request/provisioner-env.yaml
+echo "조회한 값: ${CUSTOMER_ID}"
+```
+
+두 값이 다르면 저장소 값을 고쳐야 하므로 알려 주세요(저장소 `main` 에서 수정한 뒤 `git pull`).
 
 이 확인은 **신규 과제(그룹 생성)** 를 테스트할 때만 필요합니다. 기존 과제 이전만 테스트하면 건너뛰어도 됩니다.
 
@@ -1692,7 +1686,7 @@ VPC Service Controls 경계가 있으면 두 프로젝트가 같은 경계 안�
 
 ### 3-13. secrets create jupyter-oauth-client-id
 
-3-13~3-16절은 기존 과제별 Hub에서 Google OAuth를 사용할 때 실행합니다. 실제 클라이언트 값은 [4-5-1절](#4-5-1-google-oauth-값-등록--기존-과제별-로그인-사용-시)에서 등록합니다.
+> **테스트 중에는 3-13 ~ 3-16 을 건너뛰고 3-17 로 갑니다.** `HUB_AUTH_MODE: dummy` 에서는 이 Secret 을 쓰지 않습니다. 실제 로그인 서버를 연동할 때(`oauth`) 실행하고, 값은 4-5절에서 등록합니다.
 
 ```bash
 # 기존 자원 확인
@@ -2552,50 +2546,5 @@ export TASK_GSA="<과제 서비스 계정 이메일>"
 gcloud iam service-accounts add-iam-policy-binding "${TASK_GSA}" --project="${TASK_PROJECT}" \
   --member="serviceAccount:${TF_MANAGER}" --role=roles/iam.serviceAccountAdmin
 ```
-
-</details>
-
-<a name="5-그룹-관리-사전-설정"></a>
-
-<a name="-5-그룹-관리-사전-설정"></a>
-
-## 5. 기존 과제별 자동 배포용 Workspace 설정
-
-<details>
-<summary>내용 펼치기 / 접기</summary>
-
-**수행 주체** · Workspace 최고 관리자(디렉터리 역할) + 플랫폼 운영자(릴리스 반영)
-**수행 위치** · admin.google.com + `infra-son01`의 Test03 저장소 루트
-
-기존 과제별 자동 배포에서 Provisioner가 Google Workspace 그룹을 새로 만들 때 필요한 1회성 설정입니다. Workspace 최고 관리자가 [1-4-2절에서 그룹 생성 권한을 부여](#1-4-2-google-workspace-그룹스-관리자-역할-부여)한 뒤 플랫폼 운영자가 이 절에서 Customer ID를 확인합니다. 이후 [2차 배포 문서의 플랫폼 릴리스 게시](../03.sandbox_deploy/README.md#1-릴리스-게시-코드가-바뀔-때만)로 진행합니다.
-
-<a name="5-2-cloud_identity_customer_id-확인-및-커밋"></a>
-
-### 5-1. CLOUD_IDENTITY_CUSTOMER_ID 확인 및 커밋
-
-Provisioner는 이 값으로 대상 Workspace 디렉터리를 지정합니다. 1-4-2절에서 사용한 실제 고객 ID와 일치하는지 확인합니다.
-
-```bash
-# 수행 위치: infra-son01의 Test03 저장소 루트
-git show HEAD:03.sandbox_deploy/03.1.request/provisioner-env.yaml | grep '^CLOUD_IDENTITY_CUSTOMER_ID:'
-```
-
-`__SET_CUSTOMER_ID__`가 남아 있으면 실제 값으로 수정하고 커밋합니다. 값은 1-8 끝의 `CUSTOMER_ID` 조회 결과, 또는 admin.google.com의 **계정 → 계정 설정 → 프로필 → 고객 ID** 입니다.
-
-```bash
-echo "${CUSTOMER_ID}"     # C 로 시작하는 값. 비어 있으면 1-8 끝의 조회를 먼저 실행
-sed -i "s/^CLOUD_IDENTITY_CUSTOMER_ID: __SET_CUSTOMER_ID__\$/CLOUD_IDENTITY_CUSTOMER_ID: ${CUSTOMER_ID}/" \
-  03.sandbox_deploy/03.1.request/provisioner-env.yaml
-git diff -- 03.sandbox_deploy/03.1.request/provisioner-env.yaml
-```
-
-변경 내용을 확인한 뒤 파일을 커밋합니다.
-
-```bash
-git commit --only -m 'Set Workspace customer ID for sandbox provisioning' -- \
-  03.sandbox_deploy/03.1.request/provisioner-env.yaml
-```
-
-기존 그룹을 재사용하는 경우에는 승인 요청의 import 정보를 준비합니다. 상세 설정은 [Cloud Identity 그룹 Terraform 설정](reference/cloud-identity-group-terraform.md)에 있습니다.
 
 </details>
