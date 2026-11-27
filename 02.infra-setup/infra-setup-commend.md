@@ -2381,18 +2381,17 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
 
 **1. 준비물** · Helm 차트는 쓰지 않습니다. Runner 이미지는 gcloud · kubectl · Python 만 담습니다. Terraform 은 Infrastructure Manager 가 실행합니다(4-1절).
 
-**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test03 저장소 루트에서 실행합니다. Docker가 설치되어 있고, `user01@sonmap.net`(또는 가장하는 `tf-manager`)에 edge 프로젝트 AR 업로드 권한(3-11절)이 있어야 합니다.
+**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test03 저장소 루트에서 실행합니다. Docker 가 설치되어 있어야 합니다. edge 저장소 쓰기 권한은 `tf-manager` 에만 있으므로(3-11) `user01` 이 `tf-manager` 를 가장해 로그인합니다. 로그인 토큰은 1시간 유효하므로, 빌드가 길어 업로드가 `unauthorized` 로 실패하면 로그인 블록을 다시 실행합니다.
 
 ```bash
-# 실행 위치: infra-son01, Test03 저장소 루트 | 대상: gcp-prod-edp-edge-509423 (AR) | 실행 계정: user01@sonmap.net (AR 인증)
+# 실행 위치: infra-son01, Test03 저장소 루트 | 대상: gcp-prod-edp-edge-509423 (AR) | 실행 계정: user01@sonmap.net | 가장: tf-manager
 cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
-export AR_PROJECT="gcp-prod-edp-edge-509423"
-export AR_REPOSITORY="ar-sbxtest01-platform"
 export AR_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export AR_HOST="asia-northeast3-docker.pkg.dev"
-export AR_REPO="${AR_HOST}/${AR_PROJECT}/${AR_REPOSITORY}"
 
-gcloud auth print-access-token --account="$AR_ACCOUNT" |
+# edge 저장소의 쓰기 권한은 tf-manager 에만 있으므로(3-11) tf-manager 토큰으로 로그인합니다.
+gcloud auth print-access-token --account="$AR_ACCOUNT" --impersonate-service-account="$TF_MANAGER" |
   docker login "$AR_HOST" --username oauth2accesstoken --password-stdin
 ```
 
