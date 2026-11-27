@@ -37,6 +37,7 @@
 | `does not have any valid credentials` (Cloud Shell) | Cloud Shell 에 그 계정 로그인이 없음 | `gcloud config set account admin@sonmap.net` |
 | `service-@…` 또는 `service-…@… does not exist` | 프로젝트 번호 변수가 비었거나 서비스 에이전트가 없음 | 0-1 다시 실행, 1-2 실행 여부 확인 |
 | `describe` 의 `NOT_FOUND` | 아직 없는 자원 조회 | 정상. 바로 다음 `create` 를 실행 |
+| `create` 의 `already exists` · `conflict` | 이미 만든 자원을 다시 만듦 | 정상. 무시하고 다음으로 |
 | 만든 직후 `does not exist` · `getAccessToken denied` | IAM 반영 지연 | 1 ~ 2분 뒤 다시 실행 |
 
 <a name="0-공통-변수"></a>
@@ -339,24 +340,22 @@ gcloud projects add-iam-policy-binding gcp-sbx-gke01 \
 
 ```bash
 
-# sbx-manager: 조회 성공(이미 존재)이면 바로 다음 create 한 줄은 건너뜁니다.
-# 명시적 Not Found일 때만 create를 실행합니다. 403·인증·연결 오류면 중단합니다.
 # 실행 위치 infra-son01 | 대상 ${SBX_GKE_PROJECT} | 계정 ${ADMIN_ACCOUNT}
-gcloud iam service-accounts describe "${SBX_MANAGER}" --project="${SBX_GKE_PROJECT}" --format=json \
-  --account="${ADMIN_ACCOUNT}"
-gcloud iam service-accounts create sbx-manager --project="${SBX_GKE_PROJECT}" \
-  --display-name=sbx_manager --account="${ADMIN_ACCOUNT}"
-
-# tf-manager: 조회 성공(이미 존재)이면 바로 다음 create 한 줄은 건너뜁니다.
-# 명시적 Not Found일 때만 create를 실행합니다. 403·인증·연결 오류면 중단합니다.
-gcloud iam service-accounts describe "${TF_MANAGER}" --project="${SBX_GKE_PROJECT}" --format=json \
-  --account="${ADMIN_ACCOUNT}"
-gcloud iam service-accounts create tf-manager --project="${SBX_GKE_PROJECT}" --display-name=tf_manager \
-  --account="${ADMIN_ACCOUNT}"
+# 있으면 "exists" 만 출력하고, 없을 때만 만듭니다. 블록 전체를 몇 번 붙여 넣어도 됩니다.
+for sa in sbx-manager tf-manager; do
+  email="${sa}@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
+  if gcloud iam service-accounts describe "$email" --project="${SBX_GKE_PROJECT}" \
+       --account="${ADMIN_ACCOUNT}" --format='value(email)' 2>/dev/null; then
+    echo "exists: $email"
+  else
+    gcloud iam service-accounts create "$sa" --project="${SBX_GKE_PROJECT}" \
+      --display-name="${sa//-/_}" --account="${ADMIN_ACCOUNT}"
+  fi
+done
 
 ```
 
-처음 실행하면 `describe` 가 `ERROR: … NOT_FOUND: Unknown service account` 를 내고 이어서 `Created service account [...]` 가 나옵니다. **새 프로젝트에서는 정상**입니다. `describe` 가 계정 정보를 출력하면 이미 있는 것이니 바로 다음 `create` 는 건너뜁니다. `PERMISSION_DENIED` 이면 0-0 의 3) 부터 다시 확인합니다.
+처음에는 `Created service account [...]`, 다시 실행하면 `exists: …` 가 나옵니다. 둘 다 정상입니다. `PERMISSION_DENIED` 가 나오면 0-0 의 3) 부터 다시 확인합니다.
 
 만든 직후 다음 절에서 `does not exist` 가 나오면 1분쯤 기다렸다가 같은 명령을 다시 실행합니다.
 
