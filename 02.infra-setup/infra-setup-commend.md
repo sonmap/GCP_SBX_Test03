@@ -38,6 +38,7 @@
 | `service-@…` 또는 `service-…@… does not exist` | 프로젝트 번호 변수가 비었거나 서비스 에이전트가 없음 | 0-1 다시 실행, 1-2 실행 여부 확인 |
 | `describe` 의 `NOT_FOUND` | 아직 없는 자원 조회 | 정상. 바로 다음 `create` 를 실행 |
 | `create` 의 `already exists` · `conflict` | 이미 만든 자원을 다시 만듦 | 정상. 무시하고 다음으로 |
+| `iam.serviceAccounts.getAccessToken denied` | `user01` 이 아직 `tf-manager` 를 가장할 수 없음 (1-8 전) | 1-8 까지 진행한 뒤 실행 |
 | 만든 직후 `does not exist` · `getAccessToken denied` | IAM 반영 지연 | 1 ~ 2분 뒤 다시 실행 |
 
 <a name="0-공통-변수"></a>
@@ -425,19 +426,7 @@ Workspace 최고 관리자로 [admin.google.com/ac/roles](https://admin.google.c
 
 입력란은 **이메일 주소**를 받습니다. 서비스 계정의 uniqueId(숫자)를 넣으면 `올바른 이메일 주소를 입력하세요`로 거부됩니다. 목록에 계정이 표시되면 우측 하단 **역할 지정**을 눌러 저장합니다.
 
-**부여 확인** · Workspace 고객 ID로 기존 그룹을 조회합니다. 아래 명령은 목록 조회 가능 여부를 확인합니다. 실제 그룹 생성 성공 여부는 2차 배포 실행 결과에서 확인합니다.
-
-```bash
-# 수행 위치: Cloud Shell | 로그인 계정: user01@sonmap.net | 가장: tf-manager
-gcloud identity groups search \
-  --customer=C03rw3vtp \
-  --labels=cloudidentity.googleapis.com/groups.discussion_forum \
-  --account=user01@sonmap.net \
-  --impersonate-service-account=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com \
-  --format='table(name,groupKey.id)'
-```
-
-조회에 실패하면 Workspace 고객 ID와 `tf-manager`의 역할 할당을 확인합니다.
+**부여 확인은 1-8 끝에서 합니다.** 확인 명령은 `user01` 이 `tf-manager` 를 가장해서 실행하는데, 그 가장 권한이 1-8 에서 생기기 때문입니다. 지금 실행하면 `iam.serviceAccounts.getAccessToken denied` 가 납니다.
 
 <a name="-5-sbx-manager-권한--요청-처리--workflow--build-제출"></a>
 
@@ -535,6 +524,31 @@ gcloud auth print-access-token --impersonate-service-account="${TF_MANAGER}" \
 ```
 
 `Permission 'iam.serviceAccounts.getAccessToken' denied` 가 나오면 권한 반영 대기입니다. 1 ~ 2분 뒤 다시 실행합니다.
+
+**Workspace 그룹 권한 확인 (1-4-2 를 했을 때)** · `tf-manager` 가 Workspace 그룹을 조회할 수 있는지 봅니다.
+
+```bash
+# 실행 위치 infra-son01 | 계정 user01@sonmap.net | 가장 tf-manager
+# 1) Workspace 고객 ID 조회 (C 로 시작하는 값)
+export CUSTOMER_ID="$(gcloud organizations list --account=admin@sonmap.net \
+  --filter='displayName=sonmap.net' --format='value(owner.directoryCustomerId)')"
+echo "customer id: ${CUSTOMER_ID}"
+
+# 2) tf-manager 로 그룹 목록 조회 → 표가 나오면 성공 (그룹이 하나도 없으면 빈 표)
+gcloud identity groups search --customer="${CUSTOMER_ID}" \
+  --labels=cloudidentity.googleapis.com/groups.discussion_forum \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
+  --format='table(name,groupKey.id)'
+```
+
+| 결과 | 조치 |
+|---|---|
+| `customer id:` 가 비어 있음 | admin.google.com → 계정 → 계정 설정 → 프로필의 **고객 ID** 를 보고 `export CUSTOMER_ID=C…` 로 직접 넣습니다 |
+| `getAccessToken denied` | 위 가장 확인부터 다시 |
+| `PERMISSION_DENIED` (groups.search) | 1-4-2 의 역할 할당이 아직 반영되지 않음. 몇 분 뒤 재시도, 그래도 안 되면 1-4-2 의 관리자 목록에 `tf-manager` 가 있는지 확인 |
+| `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` | 이 VM 경로에서 Cloud Identity API 가 막힘. Cloud Shell 에서 `gcloud auth login user01@sonmap.net` 후 같은 블록을 실행 (변수 `ADMIN_ACCOUNT=user01@sonmap.net`, `TF_MANAGER=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com` 먼저 지정) |
+
+이 확인은 **신규 과제(그룹 생성)** 를 테스트할 때만 필요합니다. 기존 과제 이전만 테스트하면 건너뛰어도 됩니다.
 
 <a name="-9-tf-manager-권한--지정-folder의-프로젝트-생성--iam"></a>
 
@@ -2566,10 +2580,11 @@ Provisioner는 이 값으로 대상 Workspace 디렉터리를 지정합니다. 1
 git show HEAD:03.sandbox_deploy/03.1.request/provisioner-env.yaml | grep '^CLOUD_IDENTITY_CUSTOMER_ID:'
 ```
 
-`__SET_CUSTOMER_ID__`가 남아 있으면 실제 값으로 수정하고 커밋합니다. 값은 admin.google.com의 **계정 → 계정 설정**에서 확인합니다.
+`__SET_CUSTOMER_ID__`가 남아 있으면 실제 값으로 수정하고 커밋합니다. 값은 1-8 끝의 `CUSTOMER_ID` 조회 결과, 또는 admin.google.com의 **계정 → 계정 설정 → 프로필 → 고객 ID** 입니다.
 
 ```bash
-sed -i 's/^CLOUD_IDENTITY_CUSTOMER_ID: __SET_CUSTOMER_ID__$/CLOUD_IDENTITY_CUSTOMER_ID: C03rw3vtp/' \
+echo "${CUSTOMER_ID}"     # C 로 시작하는 값. 비어 있으면 1-8 끝의 조회를 먼저 실행
+sed -i "s/^CLOUD_IDENTITY_CUSTOMER_ID: __SET_CUSTOMER_ID__\$/CLOUD_IDENTITY_CUSTOMER_ID: ${CUSTOMER_ID}/" \
   03.sandbox_deploy/03.1.request/provisioner-env.yaml
 git diff -- 03.sandbox_deploy/03.1.request/provisioner-env.yaml
 ```
