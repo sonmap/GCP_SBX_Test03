@@ -52,7 +52,7 @@
 |---|---|---|
 | `does not have permission to access projects instance [gcp-sbx-gke01]` | `user01` 그룹에 역할이 없음 | 0-0 의 2) `--apply` |
 | `RESTRICTED_VIP_REQUEST_NOT_ALLOWED` · `not available on Google's Restricted VIPs` | `infra-son01` 의 API 경로가 그 명령(주로 `beta`) 또는 그 API(Cloud Identity 등)를 막음 | 그 명령만 Cloud Shell 에서 실행 (절에 적힌 계정으로) |
-| `does not have any valid credentials` (Cloud Shell) | Cloud Shell 에 그 계정 로그인이 없음 | `gcloud config set account admin@sonmap.net` |
+| `does not have any valid credentials` (Cloud Shell) | Cloud Shell 에 그 계정 로그인이 없음 (Cloud Shell 은 admin 으로 열림) | 블록의 `--account` 를 admin 으로 실행하거나 `gcloud auth login user01@sonmap.net` |
 | `service-@…` 또는 `service-…@… does not exist` | 프로젝트 번호 조회가 실패했거나 서비스 에이전트가 없음 | 블록 첫 부분의 번호 조회 줄이 숫자를 내는지 확인, 1-2 실행 여부 확인 |
 | `describe` 의 `NOT_FOUND` | 아직 없는 자원 조회 | 정상. 바로 다음 `create` 를 실행 |
 | `create` 의 `already exists` · `conflict` | 이미 만든 자원을 다시 만듦 | 정상. 무시하고 다음으로 |
@@ -2172,16 +2172,20 @@ export REGION="asia-northeast3"
 export AR_ADMIN_ACCOUNT="admin@sonmap.net"
 export AR_PROJECT="gcp-prod-edp-edge-509423"
 export AR_REPOSITORY="ar-sbxtest01-platform"
-export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=user01@sonmap.net --format='value(projectNumber)')"
-echo "SBX_GKE_PROJECT_NUMBER=${SBX_GKE_PROJECT_NUMBER}"   # 비어 있으면 아래 명령이 잘못된 계정으로 실행됩니다
-for member in \
-  "serviceAccount:${SBX_GKE_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  "serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com"; do
-  gcloud artifacts repositories add-iam-policy-binding "${AR_REPOSITORY}" \
-    --project="${AR_PROJECT}" --location="${REGION}" \
-    --member="${member}" --role=roles/artifactregistry.reader \
-    --account="${AR_ADMIN_ACCOUNT}"
-done
+export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe gcp-sbx-gke01 --account=admin@sonmap.net --format='value(projectNumber)')"
+echo "SBX_GKE_PROJECT_NUMBER=${SBX_GKE_PROJECT_NUMBER}"   # 402269387486
+if [[ "${SBX_GKE_PROJECT_NUMBER}" =~ ^[0-9]+$ ]]; then
+  for member in \
+    "serviceAccount:${SBX_GKE_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+    "serviceAccount:service-${SBX_GKE_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com"; do
+    gcloud artifacts repositories add-iam-policy-binding "${AR_REPOSITORY}" \
+      --project="${AR_PROJECT}" --location="${REGION}" \
+      --member="${member}" --role=roles/artifactregistry.reader \
+      --account="${AR_ADMIN_ACCOUNT}" --format=none && echo "[OK] reader: ${member}"
+  done
+else
+  echo "프로젝트 번호 조회 실패. 위 오류를 확인하세요. 권한은 부여하지 않았습니다."
+fi
 ```
 
 VPC Service Controls 경계가 있으면 두 프로젝트가 같은 경계 안에 있거나 경계 규칙이 허용해야 받을 수 있습니다.
