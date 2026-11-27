@@ -36,7 +36,7 @@ flowchart LR
 
 ```bash
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
-export ADMIN_ACCOUNT="son@sonmap.net"
+export ADMIN_ACCOUNT="user01@sonmap.net"
 export REGION="asia-northeast3"
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 export TF_MANAGER_RESOURCE="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"

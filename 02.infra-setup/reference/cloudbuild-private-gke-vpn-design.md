@@ -19,13 +19,13 @@ Namespace 목록만 조회하는 점검입니다. 운영 VM의 kubeconfig와 Kub
 
 공통 기반의 **GKE와 DNS 엔드포인트, Private Pool, bootstrap 이미지**가 준비된 뒤 실행합니다. GKE를 다시 만들거나 Pool·접속 권한을 바꾼 뒤 과제 배포 전에 이 점검을 다시 실행합니다.
 
-관리 VM의 저장소 루트에서 `son@sonmap.net`으로 빌드를 제출합니다. 실제 빌드 실행 계정은 `--service-account`로 지정한 `tf-manager`입니다. `--no-source`를 사용하므로 저장소 소스를 업로드할 필요가 없습니다.
+관리 VM의 저장소 루트에서 `user01@sonmap.net`으로 빌드를 제출합니다. 실제 빌드 실행 계정은 `--service-account`로 지정한 `tf-manager`입니다. `--no-source`를 사용하므로 저장소 소스를 업로드할 필요가 없습니다.
 
 ```bash
 gcloud builds submit --no-source \
   --config=02.infra-setup/reference/check-private-gke.yaml \
   --project=gcp-sbx-gke01 --region=asia-northeast3 \
-  --account=son@sonmap.net \
+  --account=user01@sonmap.net \
   --service-account=projects/gcp-sbx-gke01/serviceAccounts/tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com
 ```
 

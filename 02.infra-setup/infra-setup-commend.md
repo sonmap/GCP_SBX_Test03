@@ -9,7 +9,8 @@
 | 실행 위치 | 관리 VM `infra-son01`의 Test03 저장소 루트 |
 | 플랫폼 프로젝트 | `SBX_GKE_PROJECT=gcp-sbx-gke01` · GKE, ALB, Cloud Build, Cloud Run, Workflows, AR, GCS |
 | Shared VPC 호스트 | `VPC_HOST_PROJECT=gcp-prod-edp-hub-vpchost` · VPC, 서브넷, 방화벽, PSA |
-| 로그인 계정 | `ADMIN_ACCOUNT=son@sonmap.net`, `VPC_ADMIN_ACCOUNT=admin@sonmap.net`, `AR_ACCOUNT=son@sonmap.net` |
+| 로그인 계정 | `ADMIN_ACCOUNT=user01@sonmap.net`, `VPC_ADMIN_ACCOUNT=admin@sonmap.net`, `AR_ACCOUNT=user01@sonmap.net` |
+| 작업 그룹 | `OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net` · 작업자 `user01@sonmap.net` 은 이 그룹 구성원 |
 | 서비스 계정 | `TF_MANAGER=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com`, `SBX_MANAGER=sbx-manager@gcp-sbx-gke01.iam.gserviceaccount.com` |
 
 각 명령 위의 주석에서 대상 프로젝트와 로그인 계정을 확인합니다. `가장`은 `--impersonate-service-account`로 API를 호출하는 계정이고, `워크로드 실행`은 `--service-account`로 지정하는 Build·Cloud Run·Workflows 실행 계정입니다. `--member`에 적힌 계정은 IAM 권한을 받는 주체입니다.
@@ -53,10 +54,10 @@ export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"   # Shared VPC
 
 ```bash
 unset CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT
-export ADMIN_ACCOUNT=son@sonmap.net
+export ADMIN_ACCOUNT=user01@sonmap.net
 # 실행 프로젝트 작업자는 son, Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
-export OPERATOR_MEMBER=user:son@sonmap.net
+export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
 export FOLDER_ID=154455658682
@@ -135,10 +136,10 @@ flowchart TD
 # ── 이 문서에서 사용하는 변수 선언 ──
 # 아래 값을 확인하고 이 블록부터 같은 터미널에서 실행합니다.
 unset CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT
-export ADMIN_ACCOUNT=son@sonmap.net
+export ADMIN_ACCOUNT=user01@sonmap.net
 # 실행 프로젝트 작업자는 son, Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
-export OPERATOR_MEMBER=user:son@sonmap.net
+export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
 export FOLDER_ID=154455658682
@@ -154,6 +155,35 @@ export SBX_GKE_PROJECT_NUMBER="$(gcloud projects describe "${SBX_GKE_PROJECT}" -
 <a name="-1-필요한-api-활성화--cicd--shared-vpc-host--gke-프로젝트"></a>
 
 <a name="1-필요한-api-활성화--cicd--shared-vpc-host--gke-프로젝트"></a>
+
+### 1-0. 작업 그룹 권한 — pgrp-gcp-sbx01
+
+작업자 `user01@sonmap.net` 은 개인이 아니라 **그룹 `pgrp-gcp-sbx01@sonmap.net`** 으로 권한을 받습니다. 역할은 운영 환경 l2comn 관리 그룹과 같은 목록이며 [grant-operator-group.sh](grant-operator-group.sh) 에 이름으로 적혀 있습니다. 스크립트가 이름으로 역할 ID 를 찾고, 찾지 못한 역할은 부여하지 않고 표시합니다.
+
+```bash
+# 실행 위치 Cloud Shell 또는 infra-son01 | 대상 gcp-sbx-gke01 | 계정 프로젝트 IAM 관리자 (admin@sonmap.net)
+export SBX_GKE_PROJECT=gcp-sbx-gke01
+export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
+export IAM_ADMIN_ACCOUNT=admin@sonmap.net
+
+./02.infra-setup/grant-operator-group.sh            # 1) 계획 확인
+./02.infra-setup/grant-operator-group.sh --apply    # 2) 부여
+```
+
+작업자는 자기 계정으로 로그인해 확인합니다. 그룹 권한은 반영까지 몇 분 걸릴 수 있습니다.
+
+```bash
+gcloud auth login user01@sonmap.net
+gcloud config set project gcp-sbx-gke01
+gcloud projects get-iam-policy gcp-sbx-gke01 --flatten=bindings \
+  --filter="bindings.members:group:pgrp-gcp-sbx01@sonmap.net" --format='value(bindings.role)'
+```
+
+**이 목록에 없는데 Test03 작업에 필요한 권한** — 1-8절에서 `OPERATOR_MEMBER` 에 부여합니다.
+
+| 역할 | 이유 |
+|---|---|
+| `tf-manager` · `sbx-manager` 에 Service Account Token Creator | 명령서는 대부분 `--impersonate-service-account=tf-manager` 로 실행합니다. Service Account User 만으로는 가장할 수 없습니다. |
 
 ### 1-1. 필요한 API 활성화 — CI/CD · Shared VPC Host · GKE 프로젝트
 
@@ -313,11 +343,11 @@ Workspace 최고 관리자로 [admin.google.com/ac/roles](https://admin.google.c
 **부여 확인** · Workspace 고객 ID로 기존 그룹을 조회합니다. 아래 명령은 목록 조회 가능 여부를 확인합니다. 실제 그룹 생성 성공 여부는 2차 배포 실행 결과에서 확인합니다.
 
 ```bash
-# 수행 위치: Cloud Shell | 로그인 계정: son@sonmap.net | 가장: tf-manager
+# 수행 위치: Cloud Shell | 로그인 계정: user01@sonmap.net | 가장: tf-manager
 gcloud identity groups search \
   --customer=C03rw3vtp \
   --labels=cloudidentity.googleapis.com/groups.discussion_forum \
-  --account=son@sonmap.net \
+  --account=user01@sonmap.net \
   --impersonate-service-account=tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com \
   --format='table(name,groupKey.id)'
 ```
@@ -1086,12 +1116,12 @@ gcloud dns record-sets create "*.pkg.dev." --zone=zone-pkg-dev \
 같은 Shared VPC의 관리 VM에서 DNS 응답이 `199.36.153.4/30`인지 확인합니다. 이후 GKE 노드의 `Ready`와 JupyterHub Pod 상태를 확인합니다. 관리 VM DNS 확인은 노드의 통신 성공까지 보장하지 않으므로, 여전히 타임아웃이 발생하면 GKE 노드의 이그레스 정책과 유효 경로를 확인합니다.
 
 ```bash
-# 수행 위치: infra-son01 | 수행 계정: son@sonmap.net
+# 수행 위치: infra-son01 | 수행 계정: user01@sonmap.net
 dig +short asia-northeast3-artifactregistry.gcr.io
 dig +short asia-northeast3-docker.pkg.dev
 
 export KUBECONFIG="$HOME/.kube/config-sbx-dns"
-export CLOUDSDK_CORE_ACCOUNT="son@sonmap.net"
+export CLOUDSDK_CORE_ACCOUNT="user01@sonmap.net"
 kubectl get nodes
 kubectl -n sbx03-smoke get pods -o wide
 ```
@@ -1200,7 +1230,7 @@ gcloud compute firewall-rules create fw-prod-edp-egress-restricted-vip \
 클러스터가 이미 있으면 노드가 `Ready`인지 확인합니다. `NotReady`가 지속되면 노드 이벤트와 이미지 다운로드 경로를 확인합니다.
 
 ```bash
-# 수행 위치: infra-son01 | 수행 계정: son@sonmap.net
+# 수행 위치: infra-son01 | 수행 계정: user01@sonmap.net
 dig +short asia-northeast3-artifactregistry.gcr.io
 kubectl get nodes
 ```
@@ -1240,8 +1270,8 @@ flowchart TD
 `gcp-sbx-gke01` 관리자는 1절의 프로젝트 API 활성화와 서비스 에이전트 준비를 수행합니다. 운영팀에 요청하기 전에 아래 명령으로 서비스 프로젝트 번호와 연결된 호스트를 확인합니다.
 
 ```bash
-# 수행 위치: infra-son01 또는 Cloud Shell | 수행 계정: ADMIN_ACCOUNT (son@sonmap.net) | 대상: gcp-sbx-gke01
-export ADMIN_ACCOUNT="son@sonmap.net"
+# 수행 위치: infra-son01 또는 Cloud Shell | 수행 계정: ADMIN_ACCOUNT (user01@sonmap.net) | 대상: gcp-sbx-gke01
+export ADMIN_ACCOUNT="user01@sonmap.net"
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 
@@ -1258,7 +1288,7 @@ gcloud iam service-accounts describe "$TF_MANAGER" \
 운영팀 회신 후 아래 명령을 배포 주체인 `tf-manager`로 실행해 서비스 프로젝트에 사용 가능한 서브넷을 확인합니다. 실행 계정에는 1절에 따라 `tf-manager` 가장 권한이 필요합니다.
 
 ```bash
-# 수행 위치: infra-son01 또는 Cloud Shell | 로그인 계정: ADMIN_ACCOUNT (son@sonmap.net)
+# 수행 위치: infra-son01 또는 Cloud Shell | 로그인 계정: ADMIN_ACCOUNT (user01@sonmap.net)
 # 수행 계정(가장): TF_MANAGER (tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com)
 # 조회 대상: gcp-prod-edp-hub-vpchost | 서비스 프로젝트: gcp-sbx-gke01
 gcloud compute networks subnets list-usable --project=gcp-prod-edp-hub-vpchost \
@@ -1318,10 +1348,10 @@ flowchart TD
 # ── 이 문서에서 사용하는 변수 선언 ──
 # 아래 값을 확인하고 이 블록부터 같은 터미널에서 실행합니다.
 unset CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT
-export ADMIN_ACCOUNT=son@sonmap.net
+export ADMIN_ACCOUNT=user01@sonmap.net
 # 실행 프로젝트 작업자는 son, Shared VPC·초기 권한 관리자는 admin으로 구분합니다.
 export VPC_ADMIN_ACCOUNT="${VPC_ADMIN_ACCOUNT:-admin@sonmap.net}"
-export OPERATOR_MEMBER=user:son@sonmap.net
+export OPERATOR_MEMBER=group:pgrp-gcp-sbx01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
 export REGION=asia-northeast3
@@ -1686,11 +1716,11 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
 
 **1. 준비물** · Helm 차트는 쓰지 않습니다. Runner 이미지를 빌드할 때 Terraform 과 Provider 를 내려받으므로, 빌드하는 곳에서 `releases.hashicorp.com` 과 `registry.terraform.io` 에 닿아야 합니다.
 
-**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test03 저장소 루트에서 실행합니다. Docker가 설치되어 있고, `son@sonmap.net`에 AR 업로드 권한이 있어야 합니다.
+**2. AR 로그인 및 이미지 빌드** · `infra-son01`의 Test03 저장소 루트에서 실행합니다. Docker가 설치되어 있고, `user01@sonmap.net`에 AR 업로드 권한이 있어야 합니다.
 
 ```bash
-# 수행 위치: infra-son01, Test03 저장소 루트 | 수행 계정: son@sonmap.net (AR 인증)
-export AR_ACCOUNT="son@sonmap.net"
+# 수행 위치: infra-son01, Test03 저장소 루트 | 수행 계정: user01@sonmap.net (AR 인증)
+export AR_ACCOUNT="user01@sonmap.net"
 export AR_HOST="asia-northeast3-docker.pkg.dev"
 export AR_REPO="${AR_HOST}/gcp-sbx-gke01/ar-sbxtest01-platform"
 
@@ -1712,7 +1742,7 @@ docker build -t "${AR_REPO}/run-sbxtest01-provisioner:bootstrap" \
 **3. 이미지 업로드 및 확인** · 두 빌드가 성공하면 같은 터미널에서 실행합니다.
 
 ```bash
-# 수행 위치: infra-son01 | 수행 계정: son@sonmap.net (AR 인증)
+# 수행 위치: infra-son01 | 수행 계정: user01@sonmap.net (AR 인증)
 docker push "${AR_REPO}/sbxtest01-automation-runner:bootstrap"
 docker push "${AR_REPO}/run-sbxtest01-provisioner:bootstrap"
 
@@ -1981,14 +2011,14 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-http --project="$
 
 #### 3-32-1. 대상 및 권한 확인
 
-**실행 위치** `infra-son01` · **로그인 계정** `son@sonmap.net` · **가장 계정** `tf-manager`
+**실행 위치** `infra-son01` · **로그인 계정** `user01@sonmap.net` · **가장 계정** `tf-manager`
 
 1-4절에서 `tf-manager`에 Certificate Manager 권한을 적용했는지 확인합니다. `sonmap.net` 공개 DNS에 검증 레코드를 추가할 권한이 있는 담당자와 협의합니다.
 
 ```bash
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
-export ADMIN_ACCOUNT="son@sonmap.net"
+export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 export DOMAIN="jupyter-group01.sonmap.net"
 export DNS_AUTH="dns-auth-jupyter-group01"
@@ -2160,7 +2190,7 @@ flowchart TD
 
 ### 3-33. Regional HTTPS Proxy
 
-**실행 위치** `infra-son01` · **로그인 계정** `son@sonmap.net` · **가장 계정** `tf-manager`
+**실행 위치** `infra-son01` · **로그인 계정** `user01@sonmap.net` · **가장 계정** `tf-manager`
 
 공유 프록시와 URL Map을 조회해 호스트와 인증서 연결 상태를 확인합니다.
 
