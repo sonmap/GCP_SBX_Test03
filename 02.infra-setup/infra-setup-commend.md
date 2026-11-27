@@ -784,7 +784,7 @@ sequenceDiagram
 | 컨트롤 플레인용 서브넷 | `subnet-prod-sbx-control-plane-an3` · `10.253.3.16/28` · 기존 사용 대역과 경로 중복 확인 후 생성 |
 | ALB 헬스 체크 방화벽 | `fw-sbxtest01-alb-hc` · `35.191.0.0/16`, `130.211.0.0/22` → GKE Pod CIDR · 인바운드 TCP `8000` |
 | ALB 프록시 방화벽 | `fw-sbxtest01-ilb-proxy` · 실제 프록시 전용 서브넷 CIDR → GKE Pod CIDR · 인바운드 TCP `8000` |
-| Cloud Build Private Pool용 PSA (보류) | `psa-prod-edp-cloudbuild` · 후보 `10.250.0.0/24` · Private Pool 사용 확정 후 요청 |
+| Cloud Build Private Pool용 PSA (보류) | `psa-prod-edp-cloudbuild` · 후보 `10.250.0.0/24` (Pool 은 그중 `10.250.0.0/29`) · Private Pool 사용 확정 후 요청 |
 | IAM | 2-2절의 서비스 계정별 역할 적용 |
 
 CIDR은 운영팀의 중복 검토 후 확정합니다. 완료 회신에 실제 서브넷 이름과 CIDR, Pod 보조 범위 이름, 방화벽 적용 결과, 필요한 경우 PSA 연결 상태를 포함해 주세요. 프로젝트팀은 회신값을 3절 변수와 맞춘 뒤 구축을 진행합니다.
@@ -1384,7 +1384,7 @@ flowchart LR
     end
 
     subgraph GOOG["Google 관리 VPC (Service Networking)"]
-      POOL["Cloud Build Private Pool 작업자<br/>pool-sbxtest01 (gcp-sbx-gke01)<br/>IP 는 10.250.0.0/24 에서 받음"]
+      POOL["Cloud Build Private Pool 작업자<br/>pool-sbxtest01 (gcp-sbx-gke01)<br/>IP 는 예약 /24 중 10.250.0.0/29 에서 받음 (최대 6대)"]
     end
 
     RNG -. "② 피어링이 이 범위를 Google 쪽에 넘김" .- PEER{{"Service Networking 피어링<br/>servicenetworking-googleapis-com"}}
@@ -2276,7 +2276,7 @@ gcloud secrets add-iam-policy-binding jupyter-oauth-client-secret --project="${S
 
 ### 3-17. Shared VPC 운영팀 작업 · Private Pool 초기 구성
 
-과제 자동화(Infrastructure Manager 와 ALB 단계)에 사용할 `pool-sbxtest01`을 준비합니다. **2-3-9절**에서 `psa-prod-edp-cloudbuild`의 `10.250.0.0/24` 예약과 Service Networking 피어링이 확인됐다면 아래 조회부터 진행합니다.
+과제 자동화(Infrastructure Manager 와 ALB 단계)에 사용할 `pool-sbxtest01`을 준비합니다. **2-3-9절**에서 `psa-prod-edp-cloudbuild`의 `10.250.0.0/24` 예약과 Service Networking 피어링이 확인됐다면 아래 조회부터 진행합니다. Pool 은 그중 `10.250.0.0/29` 만 씁니다.
 
 <a name="17-1-기존-pool-조회"></a>
 
@@ -2295,8 +2295,17 @@ gcloud builds worker-pools describe pool-sbxtest01 \
 
 #### 3-17-2. Private Pool 생성
 
+Pool 작업자 IP 는 PSA 예약 `10.250.0.0/24` 안에서 **`10.250.0.0/29` 만** 씁니다. 나머지 `10.250.0.8 ~ 10.250.0.255` 는 같은 피어링을 쓰는 다른 관리형 서비스(다른 Pool, Cloud SQL 등)용으로 남습니다.
+
+| 범위 | 주소 | 작업자 VM 최대 |
+|---|---|---|
+| `/29` (이 설정) | 8개 (사용 6개) | **6대** |
+| `/24` (기본값) | 256개 (사용 254개) | 254대 |
+
+과제 요청 하나가 Pool 작업자를 **최대 2대** 씁니다(배포 빌드 1대 + 그 안에서 실행되는 Infrastructure Manager 빌드 1대). 그래서 `/29` 에서는 **과제 3개 정도까지 동시에** 처리되고, 넘치는 빌드는 대기열에서 기다립니다. 테스트에는 충분합니다. `/29` 가 Cloud Build 가 허용하는 가장 작은 범위이고, **Pool 을 만든 뒤에는 범위를 바꿀 수 없으므로** 늘리려면 Pool 을 다시 만들어야 합니다.
+
 ```bash
-# 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net
+# 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-sbx-gke01 (Pool) · gcp-prod-edp-hub-vpchost (피어링 VPC) | 실행 계정: admin@sonmap.net
 gcloud builds worker-pools create pool-sbxtest01 \
   --project=gcp-sbx-gke01 \
   --region=asia-northeast3 \
@@ -2304,9 +2313,16 @@ gcloud builds worker-pools create pool-sbxtest01 \
   --worker-disk-size=100GB \
   --no-public-egress \
   --peered-network=projects/gcp-prod-edp-hub-vpchost/global/networks/vpc-prod-edp-hub \
-  --peered-network-ip-range=10.250.0.0/24 \
+  --peered-network-ip-range=10.250.0.0/29 \
   --account=admin@sonmap.net
+
+# 확인 → RUNNING · 10.250.0.0/29
+gcloud builds worker-pools describe pool-sbxtest01 \
+  --project=gcp-sbx-gke01 --region=asia-northeast3 --account=admin@sonmap.net \
+  --format='value(state,privatePoolV1Config.networkConfig.peeredNetworkIpRange)'
 ```
+
+`--no-public-egress` 는 작업자의 인터넷 송신을 막습니다. 이 상태에서는 `50-workload` 가 Kubernetes provider 를 `registry.terraform.io` 에서 받지 못하므로, **4-1 의 레지스트리 점검이 실패하면** 이 줄을 빼고 Pool 을 다시 만들거나 송신 경로를 따로 마련해야 합니다.
 
 <a name="17-3-상태-및-gke-접속-확인"></a>
 
