@@ -3388,7 +3388,9 @@ export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export MAIN_CLUSTER="gke-sbx-main-an3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
-export CP_IP="10.253.3.2"
+export CP_IP="$(gcloud container clusters describe "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" --format='value(privateClusterConfig.privateEndpoint)')"   # 컨트롤 플레인 사설 IP (10.253.3.0/28 안 · 보통 10.253.3.2)
+echo "CP_IP=${CP_IP}"
 export KUBECONFIG="$HOME/.kube/config-sbx"
 # ① 프록시 설정 확인 · 값이 나오면 사설 IP 요청이 프록시로 가서 EOF 가 납니다
 env | grep -i _proxy || echo "proxy 설정 없음"
@@ -3435,7 +3437,13 @@ gcloud container clusters update "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}
 
 ```bash
 # 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net (4-2-0 에서 받은 kubeconfig)
-export CP_IP="10.253.3.2"
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export MAIN_CLUSTER="gke-sbx-main-an3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export CP_IP="$(gcloud container clusters describe "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" --format='value(privateClusterConfig.privateEndpoint)')"   # 컨트롤 플레인 사설 IP (10.253.3.0/28 안 · 보통 10.253.3.2)
+echo "CP_IP=${CP_IP}"
 export KUBECONFIG="$HOME/.kube/config-sbx"
 export NO_PROXY="${CP_IP},10.253.3.0/28,${NO_PROXY:-}"
 export no_proxy="${NO_PROXY}"
