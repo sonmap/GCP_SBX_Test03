@@ -43,7 +43,7 @@
 | 15 | 3-17 ~ 3-18 | Private Pool, GKE 클러스터 | `infra-son01` | admin · user01 |
 | 16 | 3-19 ~ 3-26 | 이미지 빌드, Cloud Run, Workflow | `infra-son01` | user01 → `tf-manager` 가장 |
 | 17 | 3-27 ~ | 내부 ALB, 인증서 | `infra-son01` | user01 → `tf-manager` 가장 |
-| 18 | 4장 | Infrastructure Manager 조건 점검, StorageClass, 헬스 체크 (4-5 건너뜀) | `infra-son01` | user01 |
+| 18 | 4장 | Infrastructure Manager 조건 점검, StorageClass, 헬스 체크 (4-5 는 기존 과제 이전 때만) | `infra-son01` | user01 |
 | 19 | 다음 문서 | [2차 과제 자동화](../03.sandbox_deploy/README.md) · [기존 과제 이전](../05.migration/README.md) | | |
 
 기존 환경에서는 자원 조회 결과를 확인한 뒤 필요한 생성·갱신 명령만 실행합니다.
@@ -2197,7 +2197,7 @@ VPC Service Controls 경계가 있으면 두 프로젝트가 같은 경계 안�
 
 ### 3-13. secrets create jupyter-oauth-client-id
 
-> **테스트 중에는 3-13 ~ 3-16 을 건너뛰고 3-17 로 갑니다.** `HUB_AUTH_MODE: dummy` 에서는 이 Secret 을 쓰지 않습니다. 실제 로그인 서버를 연동할 때(`oauth`) 실행하고, 값은 4-5절에서 등록합니다.
+> **테스트 중에는 3-13 ~ 3-16 을 건너뛰고 3-17 로 갑니다.** `HUB_AUTH_MODE: dummy` 에서는 이 Secret 을 쓰지 않습니다. 실제 로그인 서버를 연동할 때(`oauth`) 실행하고, 값은 Cloud Shell 의 admin 으로 `gcloud secrets versions add` 해서 넣습니다(`user01` 은 값 추가 권한이 없습니다).
 
 ```bash
 # 기존 자원 확인
@@ -3233,8 +3233,7 @@ cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 | 4-2 | StorageClass `sbx-static-pd` | 기존 디스크를 붙이는 정적 PV |
 | 4-3 | 공용 TCP 헬스 체크 | 과제별 백엔드 서비스 |
 | 4-4 | 방화벽 포트 확인 | ALB → Pod `8080-8089` |
-| 4-5 | OAuth 값 등록 | Hub 로그인 (3-13 ~ 3-16 의 Secret) |
-| 4-6 | 기존 과제 프로젝트 권한 | 이전 과제의 Workload Identity · 이미지 · 스냅샷 |
+| 4-5 | 기존 과제 프로젝트 권한 | 이전 과제의 Workload Identity · 이미지 · 스냅샷 |
 
 ### 4-1. Infrastructure Manager 실행 조건
 
@@ -3555,29 +3554,7 @@ gcloud compute firewall-rules update fw-sbxtest01-ilb-proxy --project="${VPC_HOS
 
 Pod 에서 나가는 방향은 환경에 맞게 따로 엽니다 — 로그인 서버(443), 포털 구성원 조회 API, 패키지 다운로드 경로.
 
-### 4-5. OAuth 값 등록
-
-> **테스트 중에는 건너뜁니다.** `provisioner-env.yaml` 의 `HUB_AUTH_MODE: dummy` 이면 로그인 서버 연동이 꺼져 있고 Secret Manager 를 읽지 않습니다. 실제 연동으로 바꿀 때(`oauth`) 이 절을 수행합니다.
->
-> `oauth` 에서는 `50-workload` 가 Secret Manager 값을 읽어 과제 Namespace 에 Secret 을 만듭니다. **값이 Infrastructure Manager State 에 남으므로** State 를 볼 수 있는 사람을 `tf-manager` 와 관리자로 한정합니다. `tf-manager` 에 두 Secret 의 `roles/secretmanager.secretAccessor` 가 필요합니다.
-
-3-13 ~ 3-16 에서 만든 `jupyter-oauth-client-id` · `jupyter-oauth-client-secret` 을 그대로 씁니다. Runner 가 이 값을 과제 Namespace 의 Secret `hub-oauth` 로 복사하고, Hub 설정은 파일로 읽습니다. **값을 저장소 · 요청 JSON · Terraform 변수에 적지 않습니다.**
-
-`user01` 에는 Secret 값을 추가하는 권한(`secretmanager.versions.add`)이 없습니다(`PERMISSION_DENIED`). 값 등록은 **Cloud Shell 의 admin** 으로 합니다. 테스트(`dummy`)에서는 실수로 실행하지 않도록 주석 처리해 두었습니다.
-
-```bash
-# oauth 로 바꿀 때만 주석을 해제합니다. 테스트(dummy)에서는 실행하지 않습니다.
-# 실행 위치: Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: admin@sonmap.net
-export SBX_GKE_PROJECT="gcp-sbx-gke01"
-export SECRET_ADMIN_ACCOUNT="admin@sonmap.net"
-# 값은 화면에 남지 않게 입력합니다. client-id 도 같은 방법으로 jupyter-oauth-client-id 에 넣습니다.
-# read -rs OAUTH_VALUE && printf '%s' "$OAUTH_VALUE" | gcloud secrets versions add jupyter-oauth-client-secret \
-#   --project="${SBX_GKE_PROJECT}" --data-file=- --account="${SECRET_ADMIN_ACCOUNT}"; unset OAUTH_VALUE
-```
-
-로그인 서버에 등록할 콜백 주소는 과제의 `https://<host><base_path>hub/oauth_callback` 입니다. 로그인 서버 주소는 `provisioner-env.yaml` 의 `HUB_OAUTH_BASE_URL` 에 넣습니다.
-
-### 4-6. 기존 과제 프로젝트 권한
+### 4-5. 기존 과제 프로젝트 권한
 
 신규 과제는 `10-project` 단계가 자동화 계정 권한을 넣습니다. **이전 과제는 프로젝트가 이미 있으므로 아래 세 가지를 과제 프로젝트마다 한 번 부여합니다.**
 
