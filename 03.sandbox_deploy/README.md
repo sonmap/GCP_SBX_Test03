@@ -89,7 +89,7 @@ sequenceDiagram
 | 2 | `-project` | 프로젝트 `gcp-sbx-edp-task01` · 결제 연결 · API | 프로젝트 ID 중복 · 결제 권한 |
 | 3 | `-project-iam` | 과제 서비스 계정 · 그룹 권한 | — |
 | 4 | `-data` | BigQuery `task01_main` · 버킷 `gcp-sbx-edp-task01-data` | 버킷 이름 중복 |
-| 5 | `-workload` | Namespace `sbx-general-task01` · 디스크 · Pod · Service | GKE 접속 · 이미지 받기 |
+| 5 | `-workload` | Namespace `sbx-general-task01` · 디스크 · Pod · Service | GKE 접속 · 이미지 받기 · `hashicorp/kubernetes` 400 (Google 관리 provider 전용 설정 → 이 단계만 공개 레지스트리 사용) |
 
 
 ---
@@ -149,6 +149,30 @@ export BUILD_STAGING_BUCKET="gcp-sbx-gke01-sbxtest01-build-source"
 export COMMIT_SHA="$(git rev-parse HEAD)"
 export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
 git status --porcelain   # 아무것도 안 나와야 함
+echo "RELEASE_ID=${RELEASE_ID}"
+gcloud builds submit . --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
+  --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}" \
+  --gcs-source-staging-dir="gs://${BUILD_STAGING_BUCKET}/source" \
+  --config=03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml \
+  --substitutions="_RELEASE_ID=${RELEASE_ID},_COMMIT_SHA=${COMMIT_SHA}"
+```
+
+**infra-son01 이 GitHub 에 닿지 않을 때 (`git pull` 이 멈춤)** · 같은 게시를 **Cloud Shell** 에서 합니다. Cloud Shell 은 인터넷이 되므로 최신 `main` 을 받아 그대로 게시합니다.
+
+```bash
+# 실행 위치: Cloud Shell (user01 로그인) | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
+# user01 이 로그인돼 있지 않으면 먼저: gcloud auth login user01@sonmap.net --no-launch-browser
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export BUILD_STAGING_BUCKET="gcp-sbx-gke01-sbxtest01-build-source"
+cd ~
+if [ -d ~/GCP_SBX_Test03/.git ]; then git -C ~/GCP_SBX_Test03 pull -q origin main; else git clone -q https://github.com/sonmap/GCP_SBX_Test03.git ~/GCP_SBX_Test03; fi
+cd ~/GCP_SBX_Test03
+export COMMIT_SHA="$(git rev-parse HEAD)"
+export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
 echo "RELEASE_ID=${RELEASE_ID}"
 gcloud builds submit . --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
   --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
@@ -250,8 +274,11 @@ gcloud artifacts docker images describe "${AR_REPO}/${JUPYTER_IMAGE}" \
 cd ~/GCP_SBX_Test03
 export BUNDLE_BUCKET="gcp-sbx-gke01-sbxtest01-bundles"
 export ADMIN_ACCOUNT="user01@sonmap.net"
-export RELEASE_ID="git-b81578a90f53"   # 1번 출력의 release_id (문서만 바뀐 커밋은 다시 게시하지 않으므로 HEAD 와 다를 수 있음)
-export REQUEST_ID="REQ-TEST-TASK01-004"   # 게시할 때마다 번호를 올림. 001 ~ 003 은 이미 사용됨
+# 가장 최근에 게시된 릴리스를 자동으로 고릅니다 (1번을 어디서 했든 같음)
+export RELEASE_ID="$(gcloud storage ls -l "gs://${BUNDLE_BUCKET}/platform-releases/*/release.json" --account="${ADMIN_ACCOUNT}" \
+  | grep release.json | sort -k2 | tail -n1 | sed -E 's#.*/platform-releases/([^/]+)/release.json#\1#')"
+echo "RELEASE_ID=${RELEASE_ID}"
+export REQUEST_ID="REQ-TEST-TASK01-005"   # 게시할 때마다 번호를 올림. 001 ~ 004 는 이미 사용됨
 export EXAMPLE="test-task01-general.json"
 export BILLING_ACCOUNT="019BE7-53DD39-AF5098"   # sonmap_billing (1차 1-9)
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
@@ -299,7 +326,7 @@ export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export REQUEST_BUCKET="gcp-sbx-gke01-sbxtest01-requests"
-export REQUEST_ID="REQ-TEST-TASK01-004"   # 2-2 와 같은 값
+export REQUEST_ID="REQ-TEST-TASK01-005"   # 2-2 와 같은 값
 export REQUEST_URI="gs://${REQUEST_BUCKET}/approved/${REQUEST_ID}/request.json"
 # 올리기 전 점검 · 자리표시(<…>, 000000-…)가 남아 있으면 올리지 않고 멈춥니다. 한 번 올린 번호는 다시 쓸 수 없습니다.
 if python3 - ".local/${REQUEST_ID}.json" <<'PY'

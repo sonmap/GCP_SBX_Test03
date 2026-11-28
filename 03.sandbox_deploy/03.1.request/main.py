@@ -470,6 +470,10 @@ def start_build(payload: dict, request_uri: str, bundle_prefix: str):
     commands = ["set -euo pipefail"]
     for stage in enabled_stages(payload):
         archive = STAGES[stage][0]
+        # SERVICE_MAINTAINED serves only Google-maintained providers. 50-workload
+        # also needs hashicorp/kubernetes, which that mirror rejects (400), so it
+        # downloads from registry.terraform.io through the pool's public egress.
+        provider_source = "" if stage == "50-workload" else "--provider-source=SERVICE_MAINTAINED "
         commands.append(
             "gcloud infra-manager deployments apply "
             f"\"projects/{project}/locations/{region}/deployments/{deployment_name(payload, stage)}\" "
@@ -477,7 +481,7 @@ def start_build(payload: dict, request_uri: str, bundle_prefix: str):
             f"--gcs-source=\"{bundle_prefix}/{archive}\" "
             f"--worker-pool=\"{worker_pool}\" "
             f"--tf-version-constraint=\"{os.environ.get('TF_VERSION_CONSTRAINT', '1.5.7')}\" "
-            "--provider-source=SERVICE_MAINTAINED "
+            f"{provider_source}"
             f"--labels=\"task={task},stage={STAGES[stage][1]}\" "
             f"--annotations=\"request_id={request_id}\" "
             "--quiet"

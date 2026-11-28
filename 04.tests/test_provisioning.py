@@ -191,3 +191,11 @@ class BundleAndBuildTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ProviderSourceTests(unittest.TestCase):
+    def test_workload_stage_uses_public_registry(self):
+        import re
+        source = (Path(__file__).resolve().parents[1] / "03.sandbox_deploy/03.1.request/main.py").read_text(encoding="utf-8")
+        self.assertIn('provider_source = "" if stage == "50-workload" else "--provider-source=SERVICE_MAINTAINED "', source)
+        self.assertIsNone(re.search(r'^\s*"--provider-source=SERVICE_MAINTAINED "\s*$', source, re.M))
