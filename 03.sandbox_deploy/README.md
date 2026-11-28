@@ -177,7 +177,7 @@ cd ~/GCP_SBX_Test03
 export BUNDLE_BUCKET="gcp-sbx-gke01-sbxtest01-bundles"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export RELEASE_ID="git-b81578a90f53"   # 1번 출력의 release_id (문서만 바뀐 커밋은 다시 게시하지 않으므로 HEAD 와 다를 수 있음)
-export REQUEST_ID="REQ-TEST-TASK01-002"   # 게시할 때마다 번호를 올림. 001 은 첫 시도(이미지 오류)에 사용됨
+export REQUEST_ID="REQ-TEST-TASK01-003"   # 게시할 때마다 번호를 올림. 001 · 002 는 이미 사용됨
 export EXAMPLE="test-task01-general.json"
 export BILLING_ACCOUNT="019BE7-53DD39-AF5098"   # sonmap_billing (1차 1-9)
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
@@ -225,7 +225,7 @@ export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export REQUEST_BUCKET="gcp-sbx-gke01-sbxtest01-requests"
-export REQUEST_ID="REQ-TEST-TASK01-002"   # 2-2 와 같은 값
+export REQUEST_ID="REQ-TEST-TASK01-003"   # 2-2 와 같은 값
 export REQUEST_URI="gs://${REQUEST_BUCKET}/approved/${REQUEST_ID}/request.json"
 gcloud storage cp --if-generation-match=0 ".local/${REQUEST_ID}.json" "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}"
 export GENERATION="$(gcloud storage objects describe "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}" --format='value(generation)')"

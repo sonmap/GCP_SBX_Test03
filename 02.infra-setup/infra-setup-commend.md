@@ -2303,14 +2303,14 @@ Pool 작업자 IP 는 PSA 예약 `10.250.0.0/24` 안에서 **`10.250.0.0/29` 만
 | `/29` (이 설정) | 8개 (사용 6개) | **6대** |
 | `/24` (기본값) | 256개 (사용 254개) | 254대 |
 
-과제 요청 하나가 Pool 작업자를 **최대 2대** 씁니다(배포 빌드 1대 + 그 안에서 실행되는 Infrastructure Manager 빌드 1대). 그래서 `/29` 에서는 **과제 3개 정도까지 동시에** 처리되고, 넘치는 빌드는 대기열에서 기다립니다. 테스트에는 충분합니다. `/29` 가 Cloud Build 가 허용하는 가장 작은 범위이고, **Pool 을 만든 뒤에는 범위를 바꿀 수 없으므로** 늘리려면 Pool 을 다시 만들어야 합니다.
+과제 요청 하나가 Pool 작업자를 **동시에 2대** 씁니다(배포 빌드 1대 + 그 안에서 실행되는 Infrastructure Manager 빌드 1대). 작업자는 **`e2-standard-2` (2 vCPU)** 로 만듭니다. 새 프로젝트의 Private Pool 동시 vCPU 할당량이 작으면 4 vCPU 작업자 2대가 동시에 뜨지 못해, 바깥 빌드가 안쪽 Infrastructure Manager 빌드를 기다리며 멈춥니다(4-1-3). 그래서 `/29` 에서는 **과제 3개 정도까지 동시에** 처리되고, 넘치는 빌드는 대기열에서 기다립니다. 테스트에는 충분합니다. `/29` 가 Cloud Build 가 허용하는 가장 작은 범위이고, **Pool 을 만든 뒤에는 범위를 바꿀 수 없으므로** 늘리려면 Pool 을 다시 만들어야 합니다.
 
 ```bash
 # 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-sbx-gke01 (Pool) · gcp-prod-edp-hub-vpchost (피어링 VPC) | 실행 계정: admin@sonmap.net
 gcloud builds worker-pools create pool-sbxtest01 \
   --project=gcp-sbx-gke01 \
   --region=asia-northeast3 \
-  --worker-machine-type=e2-standard-4 \
+  --worker-machine-type=e2-standard-2 \
   --worker-disk-size=100GB \
   --peered-network=projects/gcp-prod-edp-hub-vpchost/global/networks/vpc-prod-edp-hub \
   --peered-network-ip-range=10.250.0.0/29 \
@@ -3304,7 +3304,7 @@ gcloud builds worker-pools delete pool-sbxtest01 \
   --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${POOL_ADMIN_ACCOUNT}" --quiet
 gcloud builds worker-pools create pool-sbxtest01 \
   --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
-  --worker-machine-type=e2-standard-4 \
+  --worker-machine-type=e2-standard-2 \
   --worker-disk-size=100GB \
   --peered-network=projects/gcp-prod-edp-hub-vpchost/global/networks/vpc-prod-edp-hub \
   --peered-network-ip-range=10.250.0.0/29 \
@@ -3342,6 +3342,52 @@ gcloud builds submit --no-source --config=/tmp/check-registry.yaml \
 | `curl: (28) Connection timed out` · `000` | Pool 송신이 막혀 있음 → 4-1-1 다시 확인 |
 | 4-1-1 이 `PUBLIC_EGRESS` 인데도 시간 초과 | 네트워크 담당자에게 `registry.terraform.io` · `releases.hashicorp.com` HTTPS 송신 허용 요청 |
 
+
+#### 4-1-3. 배포 빌드가 `Creating the deployment...` 에서 멈출 때 · Pool 동시 실행
+
+과제 배포 빌드(바깥)는 Pool 작업자 1대를 잡은 채, 안쪽 Infrastructure Manager 빌드가 **같은 Pool 에서 작업자 1대를 더** 받기를 기다립니다. 두 번째 작업자가 뜨지 못하면 안쪽 빌드가 `QUEUED` 로 남고 바깥 빌드는 `WORKING` 으로 1시간 넘게 멈춥니다.
+
+```mermaid
+flowchart LR
+    O["바깥 빌드 WORKING<br/>terraform 단계<br/>Creating the deployment..."] -->|"작업자 #1 사용 중"| P["pool-sbxtest01"]
+    I["안쪽 IM 빌드 QUEUED"] -->|"작업자 #2 필요"| P
+    P -->|"동시 vCPU 할당량 초과<br/>4 vCPU × 2 > 할당량"| X["#2 못 뜸 → 서로 기다림"]
+```
+
+① 상태 · 할당량 확인
+
+```bash
+# 실행 위치: Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: admin@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export POOL_ADMIN_ACCOUNT="admin@sonmap.net"
+gcloud builds worker-pools describe pool-sbxtest01 --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${POOL_ADMIN_ACCOUNT}" \
+  --format='value(state,privatePoolV1Config.workerConfig.machineType,privatePoolV1Config.networkConfig.egressOption)'
+gcloud builds list --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${POOL_ADMIN_ACCOUNT}" \
+  --filter="status=(QUEUED OR WORKING)" --format='table(id,status,createTime)'
+gcloud alpha services quota list --service=cloudbuild.googleapis.com --consumer="projects/${SBX_GKE_PROJECT}" \
+  --account="${POOL_ADMIN_ACCOUNT}" --format=json | grep -i -B2 -A12 'pool' | grep -i 'metric\|displayName\|effectiveLimit' | head -20
+```
+
+② 멈춘 빌드 취소 → 작업자를 2 vCPU 로 변경
+
+```bash
+# 실행 위치: Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: admin@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export POOL_ADMIN_ACCOUNT="admin@sonmap.net"
+for B in $(gcloud builds list --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${POOL_ADMIN_ACCOUNT}" \
+  --filter="status=(QUEUED OR WORKING)" --format='value(id)'); do
+  gcloud builds cancel "${B}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${POOL_ADMIN_ACCOUNT}"
+done
+gcloud builds worker-pools update pool-sbxtest01 --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --worker-machine-type=e2-standard-2 --account="${POOL_ADMIN_ACCOUNT}"
+gcloud builds worker-pools describe pool-sbxtest01 --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${POOL_ADMIN_ACCOUNT}" --format='value(state,privatePoolV1Config.workerConfig.machineType)'
+```
+
+`RUNNING  e2-standard-2` 이면 2차 문서의 요청을 **번호를 올려** 다시 게시합니다. 취소된 Infrastructure Manager 배포는 다음 실행에서 이어서 적용됩니다. 2 vCPU 로도 멈추면 ① 의 할당량 값을 보고 콘솔 **IAM 및 관리자 → 할당량**에서 Cloud Build Private Pool 동시 vCPU 증설을 요청합니다.
 
 **State 확인 (2차 배포 후에만 · 지금은 건너뜀)**
 
