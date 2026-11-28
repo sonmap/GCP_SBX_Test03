@@ -3188,6 +3188,14 @@ gcloud compute forwarding-rules create fr-alb-sbxtest01-shared-https --project="
 
 ### 3-35. 선택 · builds triggers create github
 
+> **테스트에서는 건너뜁니다.** 3-19 에서 이미지를 수동으로 빌드·푸시했다면 필요 없습니다.
+> 이 트리거는 `main` 에 커밋할 때마다 Runner·Provisioner 이미지를 자동으로 다시 빌드하는 운영 편의 기능입니다. 쓰려면 먼저 Cloud Build 에 GitHub 저장소 연결(콘솔 → Cloud Build → 저장소)이 필요합니다.
+
+| 상황 | 3-35 |
+|---|---|
+| 테스트 · 이미지 수동 빌드 (3-19) | 건너뜀 → 4절 |
+| 커밋마다 이미지 자동 빌드가 필요할 때 | 주석 해제 후 실행 |
+
 ```bash
 # 선택 작업: 필요한 경우에만 아래 명령의 주석을 해제합니다.
 # 기존 자원 확인
@@ -3199,14 +3207,14 @@ cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 # 조회 결과가 명시적 Not Found일 때만 아래 생성 명령을 실행합니다.
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager | 워크로드 실행: tf-manager
 # gcloud builds triggers create github --name=trigger-sbxtest01-platform-release \
-#   --project="${SBX_GKE_PROJECT}" --region="${REGION}" --repo-owner=sonmap --repo-name=GCP_SBX_Test01 \
+#   --project="${SBX_GKE_PROJECT}" --region="${REGION}" --repo-owner=sonmap --repo-name=GCP_SBX_Test03 \
 #   --branch-pattern="^main$" \
 #   --build-config=03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml \
 #   --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}" \
 #   '--substitutions=_RELEASE_ID=git-$SHORT_SHA,_COMMIT_SHA=$COMMIT_SHA' --account="${ADMIN_ACCOUNT}" \
 #   --impersonate-service-account="${TF_MANAGER}"
 
-# 다음: 4절 JupyterHub 준비·검증 → 기존 과제별 자동 배포라면 5절 Workspace 설정 → 2차 배포
+# 다음: 4절 과제 Pod 실행 준비 → 2차 배포
 # Build 설정은 03.sandbox_deploy/03.3.gke/cloudbuild에, Cloud Run과 Workflows 설정은 03.sandbox_deploy/03.1.request에 있습니다.
 ```
 
