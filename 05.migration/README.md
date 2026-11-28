@@ -18,6 +18,25 @@ flowchart LR
 | `03_make_request.py` | 과제 요청 JSON 생성 | 없음 |
 | `04_verify.sh` | PVC · Pod · Workload Identity · 홈 디렉터리 · 로그인 화면 | 없음 (조회) |
 
+## 이전 전 준비 · 과제 프로젝트 권한 (과제마다 한 번)
+
+신규 과제는 `10-project` 단계가 자동화 계정 권한을 넣습니다. **이전 과제는 프로젝트가 이미 있으므로 아래 세 가지를 과제 프로젝트마다 한 번 부여합니다.**
+
+| 받는 주체 | 과제 프로젝트에서 필요한 권한 | 이유 |
+|---|---|---|
+| Terraform 실행 계정 (`tf-manager` 또는 `WI_IMPERSONATE_SA`) | 과제 서비스 계정에 `roles/iam.serviceAccountAdmin` | Workload Identity 바인딩 추가 |
+| GKE 노드 서비스 계정 | 과제 이미지 저장소에 `roles/artifactregistry.reader` | Pod 이미지 받기 |
+| 디스크를 만드는 계정 | `roles/compute.storageAdmin` (스냅샷 생성 · 읽기) | 스냅샷 → GKE 프로젝트 디스크 |
+
+```bash
+# 실행 위치: infra-son01 | 대상: 과제 프로젝트 | 실행 계정: 과제 프로젝트 IAM 관리자
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export TASK_PROJECT="<과제 프로젝트>"
+export TASK_GSA="<과제 서비스 계정 이메일>"
+gcloud iam service-accounts add-iam-policy-binding "${TASK_GSA}" --project="${TASK_PROJECT}" \
+  --member="serviceAccount:${TF_MANAGER}" --role=roles/iam.serviceAccountAdmin
+```
+
 ## 과제 1개 이전
 
 ```bash
