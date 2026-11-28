@@ -177,7 +177,7 @@ cd ~/GCP_SBX_Test03
 export BUNDLE_BUCKET="gcp-sbx-gke01-sbxtest01-bundles"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export RELEASE_ID="git-b81578a90f53"   # 1번 출력의 release_id (문서만 바뀐 커밋은 다시 게시하지 않으므로 HEAD 와 다를 수 있음)
-export REQUEST_ID="REQ-TEST-TASK01-003"   # 게시할 때마다 번호를 올림. 001 · 002 는 이미 사용됨
+export REQUEST_ID="REQ-TEST-TASK01-004"   # 게시할 때마다 번호를 올림. 001 ~ 003 은 이미 사용됨
 export EXAMPLE="test-task01-general.json"
 export BILLING_ACCOUNT="019BE7-53DD39-AF5098"   # sonmap_billing (1차 1-9)
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
@@ -225,14 +225,30 @@ export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export REQUEST_BUCKET="gcp-sbx-gke01-sbxtest01-requests"
-export REQUEST_ID="REQ-TEST-TASK01-003"   # 2-2 와 같은 값
+export REQUEST_ID="REQ-TEST-TASK01-004"   # 2-2 와 같은 값
 export REQUEST_URI="gs://${REQUEST_BUCKET}/approved/${REQUEST_ID}/request.json"
-gcloud storage cp --if-generation-match=0 ".local/${REQUEST_ID}.json" "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}"
-export GENERATION="$(gcloud storage objects describe "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}" --format='value(generation)')"
-export SHA256="$(sha256sum ".local/${REQUEST_ID}.json" | cut -d' ' -f1)"
-gcloud workflows run workflow-sbxtest01-provision \
-  --project="${SBX_GKE_PROJECT}" --location="${REGION}" --account="${ADMIN_ACCOUNT}" \
-  --data="{\"request_id\":\"${REQUEST_ID}\",\"approved_json_uri\":\"${REQUEST_URI}\",\"generation\":${GENERATION},\"sha256\":\"${SHA256}\"}"
+# 올리기 전 점검 · 자리표시(<…>, 000000-…)가 남아 있으면 올리지 않고 멈춥니다. 한 번 올린 번호는 다시 쓸 수 없습니다.
+if python3 - ".local/${REQUEST_ID}.json" <<'PY'
+import json, re, sys
+r = json.load(open(sys.argv[1]))
+image = r["workload"]["containers"][0]["image"]
+billing = r["project"]["billing_account"]
+print("request:", r["request_id"])
+print("image  :", image)
+print("billing:", billing)
+ok = r["request_id"] == sys.argv[1].split("/")[-1][:-5] and re.fullmatch(r"[a-z0-9./_:-]+@sha256:[0-9a-f]{64}", image) and not billing.startswith("000000")
+sys.exit(0 if ok else 1)
+PY
+then
+  gcloud storage cp --if-generation-match=0 ".local/${REQUEST_ID}.json" "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}" && \
+  export GENERATION="$(gcloud storage objects describe "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}" --format='value(generation)')" && \
+  export SHA256="$(sha256sum ".local/${REQUEST_ID}.json" | cut -d' ' -f1)" && \
+  gcloud workflows run workflow-sbxtest01-provision \
+    --project="${SBX_GKE_PROJECT}" --location="${REGION}" --account="${ADMIN_ACCOUNT}" \
+    --data="{\"request_id\":\"${REQUEST_ID}\",\"approved_json_uri\":\"${REQUEST_URI}\",\"generation\":${GENERATION},\"sha256\":\"${SHA256}\"}"
+else
+  echo "요청 파일 점검 실패 → 올리지 않았습니다. 2-2 를 다시 실행하세요 (번호는 그대로 써도 됩니다)."
+fi
 ```
 
 | 결과 | 의미 |
