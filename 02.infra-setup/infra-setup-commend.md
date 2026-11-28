@@ -3438,6 +3438,38 @@ ip -4 addr show | grep inet   # OS 가 실제로 쓰는 IP
 | 내부 IP `172.31.10.x` | 승인 범위 안 → ⑥ 은 Pool 대역(`10.250.0.0/29`)이 없을 때만 |
 | 내부 IP `172.32.10.x` | 승인 범위 밖 → VM 을 `172.31.10.0/24` 서브넷으로 옮기거나 ⑥ 의 `ADMIN_CIDR` 을 VM 대역으로 |
 
+##### 4-2-0-2. infra-son01 을 172.31.10.0/24 로 옮기기 (4-2-0-1 이 172.32.10.x 일 때만)
+
+VM 이 잠시 멈췄다가 다시 시작합니다. VM 의 SSH 세션은 끊기므로 Cloud Shell 에서 실행합니다.
+
+```bash
+# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost | 실행 계정: admin@sonmap.net
+export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
+export NETWORK="vpc-prod-edp-hub"
+export REGION="asia-northeast3"
+# ① 172.31.10.0/24 서브넷 이름 확인
+gcloud compute networks subnets list --project="${VPC_HOST_PROJECT}" --network="${NETWORK}" \
+  --regions="${REGION}" --format="table(name,ipCidrRange)" --account=admin@sonmap.net
+```
+
+```bash
+# 실행 위치: Cloud Shell | 대상: gcp-prod-edp-hub-vpchost (infra-son01) | 실행 계정: admin@sonmap.net
+export VPC_HOST_PROJECT="gcp-prod-edp-hub-vpchost"
+export NETWORK="vpc-prod-edp-hub"
+export ZONE="asia-northeast3-b"
+export VM_NAME="infra-son01"
+export NEW_SUBNET="<① 에서 172.31.10.0/24 인 서브넷 이름>"
+export NEW_IP="172.31.10.2"
+# ② 중지 → 서브넷 변경 → 시작
+gcloud compute instances stop "${VM_NAME}" --zone="${ZONE}" --project="${VPC_HOST_PROJECT}" --account=admin@sonmap.net
+gcloud compute instances network-interfaces update "${VM_NAME}" --zone="${ZONE}" --project="${VPC_HOST_PROJECT}" \
+  --network-interface=nic0 --network="${NETWORK}" --subnetwork="${NEW_SUBNET}" --private-network-ip="${NEW_IP}" \
+  --account=admin@sonmap.net
+gcloud compute instances start "${VM_NAME}" --zone="${ZONE}" --project="${VPC_HOST_PROJECT}" --account=admin@sonmap.net
+```
+
+VM 에 다시 SSH 접속한 뒤 4-2-0-1 을 다시 실행해 `내부 IP : 172.31.10.2` 를 확인하고 ⑥ 으로 갑니다.
+
 ⑥ 승인 네트워크에 `infra-son01` 과 Private Pool 대역 넣기 · ③ 의 `cidrBlocks` 에 `172.31.10.0/24` · `10.250.0.0/29` 가 없으면 실행합니다.
 
 | 대역 | 누구 | 왜 |
