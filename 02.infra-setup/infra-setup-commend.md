@@ -3113,7 +3113,7 @@ export CERT_REFS="${MANAGED_CERT}"   # 이름만. 전체 경로를 넣으면 gcl
 
 #### 3-33-1. 신규 프록시 생성
 
-프록시 조회에서 `NOT_FOUND`가 확인되면 실행합니다.
+프록시 조회에서 `NOT_FOUND`가 확인되면 실행합니다. `Created [...]` 와 함께 `SSL_CERTIFICATES` 에 `cert-sbx-managed` 가 보이면 성공이며, **3-33-2 는 건너뛰고 3-34 로 갑니다.**
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
@@ -3129,7 +3129,11 @@ gcloud compute target-https-proxies create https-proxy-alb-sbxtest01-shared \
   --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
 ```
 
-#### 3-33-2. 기존 프록시 갱신
+#### 3-33-2. 기존 프록시 갱신 (해당할 때만)
+
+> **3-33-1 로 방금 만들었다면 실행하지 않습니다.** 아래 경우에만 실행합니다.
+> - 3-33-1 이 `already exists` 로 실패했고, 기존 프록시의 인증서가 `cert-sbx-managed` 와 다를 때
+> - 나중에 새 도메인 인증서를 추가해 프록시의 인증서 목록을 바꿀 때 (3-32-4 운영 도메인 전환)
 
 프록시가 이미 있으면 준비된 인증서 전체 목록으로 갱신합니다.
 
