@@ -176,7 +176,7 @@ gcloud artifacts docker images describe "${AR_REPO}/${JUPYTER_IMAGE}" \
 cd ~/GCP_SBX_Test03
 export BUNDLE_BUCKET="gcp-sbx-gke01-sbxtest01-bundles"
 export ADMIN_ACCOUNT="user01@sonmap.net"
-export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
+export RELEASE_ID="git-b81578a90f53"   # 1번 출력의 release_id (문서만 바뀐 커밋은 다시 게시하지 않으므로 HEAD 와 다를 수 있음)
 export REQUEST_ID="REQ-TEST-TASK01-002"   # 게시할 때마다 번호를 올림. 001 은 첫 시도(이미지 오류)에 사용됨
 export EXAMPLE="test-task01-general.json"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
@@ -187,12 +187,16 @@ export JUPYTER_IMAGE_TAG="v1"
 export JUPYTER_DIGEST="$(gcloud artifacts docker images describe "${AR_REPO}/${JUPYTER_IMAGE_NAME}:${JUPYTER_IMAGE_TAG}" \
   --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" --format='value(image_summary.digest)')"
 echo "JUPYTER_DIGEST=${JUPYTER_DIGEST}"
-[[ "${JUPYTER_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "digest 없음 → 2-0 을 먼저 실행"; return 1 2>/dev/null || exit 1; }
-export JUPYTER_IMAGE_REF="${AR_REPO}/${JUPYTER_IMAGE_NAME}@${JUPYTER_DIGEST}"
+export JUPYTER_IMAGE_REF=""
+if [[ "${JUPYTER_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  export JUPYTER_IMAGE_REF="${AR_REPO}/${JUPYTER_IMAGE_NAME}@${JUPYTER_DIGEST}"
+else
+  echo "digest 없음 → 2-0 을 먼저 실행하세요. 요청 파일을 만들지 않습니다."
+fi
 mkdir -p .local
 gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/release.json" \
   --account="${ADMIN_ACCOUNT}" > .local/release.json
-python3 - "03.sandbox_deploy/03.1.request/examples/${EXAMPLE}" .local/release.json \
+[ -n "${JUPYTER_IMAGE_REF}" ] && python3 - "03.sandbox_deploy/03.1.request/examples/${EXAMPLE}" .local/release.json \
   "${REQUEST_ID}" "${JUPYTER_IMAGE_REF}" ".local/${REQUEST_ID}.json" <<'PY'
 import json, sys
 src, rel, req_id, image, out = sys.argv[1:]
