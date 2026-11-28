@@ -155,7 +155,7 @@ export MAIN_POD_CIDR=100.64.128.0/19
 export MAIN_CP_CIDR=10.253.3.0/28
 export PSA_NAME=psa-prod-edp-cloudbuild
 export PSA_CIDR=10.250.0.0/24
-export ADMIN_CIDR=172.31.10.0/24
+export ADMIN_CIDR=172.32.10.0/24   # infra-son01 서브넷 (VM IP 172.32.10.2)
 export BILLING_ACCOUNT=""
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 export SBX_MANAGER="sbx-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
@@ -1879,7 +1879,7 @@ export MAIN_SUBNET=subnet-prod-sbx-gke-01
 export MAIN_POD_RANGE=subnet-prod-sbx-pod-01
 export MAIN_CP_CIDR=10.253.3.0/28
 export PSA_CIDR=10.250.0.0/24
-export ADMIN_CIDR=172.31.10.0/24
+export ADMIN_CIDR=172.32.10.0/24   # infra-son01 서브넷 (VM IP 172.32.10.2)
 export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 export SBX_MANAGER="sbx-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
@@ -2349,7 +2349,8 @@ export MAIN_SUBNET="subnet-prod-sbx-gke-01"
 export MAIN_POD_RANGE="subnet-prod-sbx-pod-01"
 export MAIN_CP_CIDR="10.253.3.0/28"
 export MAIN_CLUSTER="gke-sbx-main-an3"
-export ADMIN_CIDR="172.31.10.0/24"
+export ADMIN_CIDR="172.32.10.0/24"   # infra-son01 서브넷 (VM IP 172.32.10.2)
+export POOL_CIDR="10.250.0.0/29"     # Private Pool 작업자 (3-17-2)
 gcloud container clusters describe "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" \
   --region="${REGION}" --format=json --account="${ADMIN_ACCOUNT}" \
   --impersonate-service-account="${TF_MANAGER}"
@@ -2361,7 +2362,7 @@ gcloud container clusters create-auto "${MAIN_CLUSTER}" --project="${SBX_GKE_PRO
   --subnetwork="projects/${VPC_HOST_PROJECT}/regions/${REGION}/subnetworks/${MAIN_SUBNET}" \
   --cluster-secondary-range-name="${MAIN_POD_RANGE}" --enable-private-nodes --enable-private-endpoint \
   --master-ipv4-cidr="${MAIN_CP_CIDR}" --enable-master-authorized-networks \
-  --master-authorized-networks="${ADMIN_CIDR}" --enable-master-global-access \
+  --master-authorized-networks="${ADMIN_CIDR},${POOL_CIDR}" --enable-master-global-access \
   --release-channel=regular --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
 
 ```
@@ -3394,7 +3395,7 @@ echo "CP_IP=${CP_IP}"
 export KUBECONFIG="$HOME/.kube/config-sbx"
 # ① 프록시 설정 확인 · 값이 나오면 사설 IP 요청이 프록시로 가서 EOF 가 납니다
 env | grep -i _proxy || echo "proxy 설정 없음"
-# ② VM 내부 IP → 승인 네트워크(172.31.10.0/24) 안이어야 함
+# ② VM 내부 IP → ③ 의 승인 네트워크(cidrBlocks) 안이어야 함 (infra-son01 = 172.32.10.2)
 hostname -I
 # ③ 클러스터 엔드포인트 · 승인 네트워크
 gcloud container clusters describe "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
@@ -3414,10 +3415,17 @@ kubectl get ns
 |---|---|---|
 | `kubectl get ns` 가 `default` · `kube-system` 출력 | 정상 | 4-2-1 로 |
 | ① 에 `https_proxy` 값이 있고 ④ 가 `401` · `403` · `200` | 프록시가 사설 IP 를 가로챔 | ⑤ 의 `NO_PROXY` 로 해결. 새 셸마다 `NO_PROXY` 줄을 다시 실행하거나 `~/.bashrc` 에 추가 |
-| ④ `CP 443 연결 실패` · 시간 초과 | VM 이 승인 네트워크 밖이거나 경로 없음 | ② 의 IP 가 ③ 의 `cidrBlocks` 안인지 확인 → 밖이면 아래 ⑥ |
+| ④ `000` · `CP 443 연결 실패` | VM IP 가 승인 네트워크 밖 (예: VM `172.32.10.2`, 목록 `172.31.10.0/24`) | 아래 ⑥ 실행 후 4-2-0 다시 |
 | ④ 가 `000` 이고 ② 의 IP 가 승인 범위 안 | 방화벽 · 피어링 경로 | VPC 담당자에게 `infra-son01 → 10.253.3.0/28 TCP 443` 확인 요청 |
 
-⑥ VM IP 가 승인 네트워크 밖일 때만 · VM 이 속한 대역을 추가합니다 (`VM_CIDR` 을 ② 결과에 맞게 바꿉니다).
+⑥ 승인 네트워크에 `infra-son01` 과 Private Pool 대역 넣기 · ③ 의 `cidrBlocks` 에 `172.32.10.0/24` · `10.250.0.0/29` 가 없으면 실행합니다.
+
+| 대역 | 누구 | 왜 |
+|---|---|---|
+| `172.32.10.0/24` | `infra-son01` (172.32.10.2) | 4절 `kubectl` |
+| `10.250.0.0/29` | Private Pool 작업자 | `50-workload` Terraform · ALB 단계의 `kubectl` |
+
+`privateEndpointEnforcementEnabled: true` 라서 사설 IP 로 접속해도 이 목록에 없으면 연결이 끊깁니다(④ 가 `000`). 처음 클러스터를 만들 때 `172.31.10.0/24` 로 잘못 넣은 경우가 이 상황입니다. 이 명령은 목록을 **통째로 바꿉니다**.
 
 ```bash
 # 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net | 가장: tf-manager
@@ -3426,11 +3434,14 @@ export REGION="asia-northeast3"
 export MAIN_CLUSTER="gke-sbx-main-an3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
-export ADMIN_CIDR="172.31.10.0/24"
-export VM_CIDR="172.31.10.0/24"   # ② 의 VM IP 가 속한 대역으로 변경
+export ADMIN_CIDR="172.32.10.0/24"   # infra-son01 서브넷
+export POOL_CIDR="10.250.0.0/29"     # Private Pool 작업자
 gcloud container clusters update "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
-  --enable-master-authorized-networks --master-authorized-networks="${ADMIN_CIDR},${VM_CIDR}" \
+  --enable-master-authorized-networks --master-authorized-networks="${ADMIN_CIDR},${POOL_CIDR}" \
   --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
+# 확인 → 172.32.10.0/24 · 10.250.0.0/29
+gcloud container clusters describe "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" --format="value(masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock)"
 ```
 
 #### 4-2-1. StorageClass 생성
