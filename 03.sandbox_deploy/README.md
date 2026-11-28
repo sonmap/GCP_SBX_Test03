@@ -39,6 +39,24 @@ flowchart LR
 | 테스트용 Jupyter 이미지가 edge AR 에 있음 | `gcp-prod-edp-edge-509423/ar-sbxtest01-platform` | 2-1 에서 digest 확인 |
 | 결제 계정 | 1차 1-9 | `019BE7-53DD39-AF5098` (예시 파일에 이미 입력) |
 
+### 0-1. 저장소 준비 (git 저장소인지 확인)
+
+1번은 `git` 으로 커밋 번호를 읽으므로 `~/GCP_SBX_Test03` 이 **git 으로 받은 저장소**여야 합니다. `fatal: not a git repository` 가 나오면 이 블록을 실행합니다.
+
+```bash
+# 실행 위치: infra-son01 | 대상: 로컬 저장소 ~/GCP_SBX_Test03 | 실행 계정: VM 로그인 사용자
+cd ~
+if git -C ~/GCP_SBX_Test03 rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C ~/GCP_SBX_Test03 pull -q origin main && echo "git 저장소 OK · 최신으로 갱신"
+else
+  [ -d ~/GCP_SBX_Test03 ] && mv ~/GCP_SBX_Test03 ~/GCP_SBX_Test03.bak-$(date +%Y%m%d%H%M) && echo "기존 폴더는 .bak 으로 보관"
+  git clone -q https://github.com/sonmap/GCP_SBX_Test03.git ~/GCP_SBX_Test03 && echo "새로 clone 완료"
+fi
+cd ~/GCP_SBX_Test03 && git log --oneline -1 && ls 03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml
+```
+
+마지막 줄에 커밋 한 줄과 `platform-release.yaml` 경로가 나오면 준비 완료입니다. 이후 블록은 모두 `cd ~/GCP_SBX_Test03` 으로 시작합니다.
+
 아래 블록은 모두 **infra-son01 의 `~/GCP_SBX_Test03`** 에서 순서대로 실행합니다. 블록마다 필요한 변수를 다시 선언하므로 앞 블록을 다시 실행할 필요가 없습니다.
 
 ## 1. 릴리스 게시 (처음 한 번 · 코드가 바뀔 때마다)
