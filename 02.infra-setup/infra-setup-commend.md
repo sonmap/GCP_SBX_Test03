@@ -2312,7 +2312,6 @@ gcloud builds worker-pools create pool-sbxtest01 \
   --region=asia-northeast3 \
   --worker-machine-type=e2-standard-4 \
   --worker-disk-size=100GB \
-  --no-public-egress \
   --peered-network=projects/gcp-prod-edp-hub-vpchost/global/networks/vpc-prod-edp-hub \
   --peered-network-ip-range=10.250.0.0/29 \
   --account=admin@sonmap.net
@@ -2323,7 +2322,7 @@ gcloud builds worker-pools describe pool-sbxtest01 \
   --format='value(state,privatePoolV1Config.networkConfig.peeredNetworkIpRange)'
 ```
 
-`--no-public-egress` 는 작업자의 인터넷 송신을 막습니다. 이 상태에서는 `50-workload` 가 Kubernetes provider 를 `registry.terraform.io` 에서 받지 못하므로, **4-1 의 레지스트리 점검이 실패하면** 이 줄을 빼고 Pool 을 다시 만들거나 송신 경로를 따로 마련해야 합니다.
+**테스트에서는 `--no-public-egress` 를 넣지 않습니다.** 이 옵션을 넣으면 작업자가 인터넷에 나가지 못해, `50-workload` 가 Kubernetes provider 를 `registry.terraform.io` 에서 받지 못하고 4-1 점검이 `curl: (28) Connection timed out` 으로 실패합니다. 이미 이 옵션으로 만들었다면 4-1-1 로 송신을 엽니다. 피어링(GKE · PSA 사설 접속)은 그대로 유지됩니다.
 
 <a name="17-3-상태-및-gke-접속-확인"></a>
 
@@ -3278,7 +3277,54 @@ gcloud builds submit --no-source --config=/tmp/check-registry.yaml \
   --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"
 ```
 
-`200` 이 나오면 됩니다. 막혀 있으면 네트워크 담당자에게 두 도메인의 송신 허용을 요청합니다.
+`200` 이 나오면 됩니다. `curl: (28) Connection timed out` · `000` 이 나오면 Pool 이 인터넷 송신 없이(`--no-public-egress`) 만들어진 것입니다 → **4-1-1**.
+
+#### 4-1-1. 레지스트리 점검 실패 시 · Pool 인터넷 송신 열기
+
+| 결과 | 원인 | 조치 |
+|---|---|---|
+| `200` | 정상 | 4-1-1 건너뜀 |
+| `curl: (28) Connection timed out` · `000` | Pool 이 `--no-public-egress` | 아래 ① 실행 후 4-1 점검 다시 |
+| ① 이 `cannot be updated` · `INVALID_ARGUMENT` | 이 설정을 바꿀 수 없는 Pool | ② 삭제 후 재생성 |
+
+**① 기존 Pool 송신 허용**
+
+```bash
+# 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-sbx-gke01 (Pool) | 실행 계정: admin@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export POOL_ADMIN_ACCOUNT="admin@sonmap.net"
+gcloud builds worker-pools update pool-sbxtest01 \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --public-egress \
+  --account="${POOL_ADMIN_ACCOUNT}"
+
+# 확인 → egressOption 이 PUBLIC_EGRESS 또는 비어 있으면 송신 허용
+gcloud builds worker-pools describe pool-sbxtest01 \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${POOL_ADMIN_ACCOUNT}" \
+  --format='value(state,privatePoolV1Config.networkConfig.egressOption,privatePoolV1Config.networkConfig.peeredNetworkIpRange)'
+```
+
+**② ① 이 실패할 때만 · 삭제 후 재생성** (실행 중인 빌드가 없을 때)
+
+```bash
+# 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-sbx-gke01 (Pool) · gcp-prod-edp-hub-vpchost (피어링 VPC) | 실행 계정: admin@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export POOL_ADMIN_ACCOUNT="admin@sonmap.net"
+gcloud builds worker-pools delete pool-sbxtest01 \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${POOL_ADMIN_ACCOUNT}" --quiet
+gcloud builds worker-pools create pool-sbxtest01 \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --worker-machine-type=e2-standard-4 \
+  --worker-disk-size=100GB \
+  --peered-network=projects/gcp-prod-edp-hub-vpchost/global/networks/vpc-prod-edp-hub \
+  --peered-network-ip-range=10.250.0.0/29 \
+  --account="${POOL_ADMIN_ACCOUNT}"
+```
+
+그다음 4-1 의 레지스트리 점검을 다시 실행해 `200` 을 확인합니다.
+
 
 **State 확인**
 
