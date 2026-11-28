@@ -18,6 +18,80 @@ flowchart LR
 
 **수행 위치** · 관리 VM 의 Test03 저장소 루트
 
+### 전체 순서 한눈에 보기
+
+**사람이 하는 일**(절 번호)과 **자동으로 일어나는 일**을 나눠 봅니다.
+
+```mermaid
+flowchart TD
+    subgraph ONCE["한 번만 (코드가 바뀔 때만 다시)"]
+        S1["1 · 릴리스 게시<br/>Runner · Provisioner 이미지 + Terraform ZIP<br/>→ release_id"]
+        S20["2-0 · 테스트 Jupyter 이미지 빌드<br/>(기존 과제 이미지가 없을 때)"]
+    end
+    subgraph EACH["과제마다 · 변경할 때마다"]
+        S21["2-1 · 이미지 digest 확인"]
+        S22["2-2 · 요청 JSON 만들기<br/>예시 + release_id + digest + 결제 계정<br/>→ .local/REQ-….json"]
+        S3["3 · 점검 → GCS 에 올리기 → Workflow 실행<br/>(접수만 · 몇 초)"]
+        S4["4 · 결과 확인<br/>빌드 · 배포 상태 반복 조회 (10~20분)"]
+    end
+    S1 --> S22
+    S20 --> S21 --> S22 --> S3 --> S4
+    S4 -->|"FAILED"| FIX["원인 수정 → 2-2 를 번호 올려 다시"]
+    S4 -->|"[OK] … reconcile complete"| URL["https://sbx.sonmap.net/general/task01/"]
+```
+
+**3번을 실행한 뒤 자동으로 일어나는 일**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 운영자 (infra-son01 · user01)
+    participant G as GCS requests/approved
+    participant W as Workflow<br/>workflow-sbxtest01-provision
+    participant R as Cloud Run<br/>run-sbxtest01-provisioner
+    participant B as GCS bundles
+    participant CB as Cloud Build (바깥)<br/>Private Pool · tf-manager
+    participant IM as Infrastructure Manager<br/>(안쪽 빌드 · Private Pool)
+    participant K as GKE gke-sbx-main-an3
+    participant L as 공유 내부 ALB
+
+    U->>G: 요청 JSON 올리기 (번호당 1번만)
+    U->>W: 실행 (request_id · 위치 · generation · sha256)
+    W->>R: 요청 전달
+    R->>G: 요청 읽기 · 파일 무결성 확인
+    R->>R: 형식 · 값 검사 (image digest · 영역 · 이름 규칙 …)
+    alt 검사 실패
+        R-->>W: 400 오류
+        W-->>U: state FAILED (여기서 끝 · 아무것도 안 만들어짐)
+    else 검사 통과
+        R->>B: 단계별 Terraform 묶음 · 승인 요청 저장
+        R->>CB: 빌드 1개 시작
+        R-->>W: 접수 완료
+        W-->>U: state SUCCEEDED (접수만 된 것)
+        loop 5단계 순서대로
+            CB->>IM: deployments apply (단계 1개)
+            IM->>IM: Terraform 실행 · State 저장
+            IM-->>CB: ACTIVE 또는 FAILED
+        end
+        Note over IM,K: 50-workload 단계가 GKE 에<br/>Namespace · 디스크 · Pod · Service 생성
+        CB->>K: alb 단계 · Pod 의 NEG 확인
+        CB->>L: 백엔드 서비스 · URL 경로 규칙 추가
+        CB->>B: 적용된 요청 기록 (applied-request.json)
+        CB-->>U: 로그 마지막 줄 [OK] Sandbox task01 reconcile complete
+    end
+```
+
+**Infrastructure Manager 5단계** · 배포 이름은 `sbxtest01-<과제>-<해시>-<단계>` 로 고정이라, 실패하면 다음 요청이 같은 배포를 **이어서** 적용합니다(`FAILED` → `UPDATING` → `ACTIVE`).
+
+| 순서 | 배포 이름 끝 | 만드는 것 (task01 예) | 자주 나는 실패 |
+|---|---|---|---|
+| 1 | `-group` | 그룹 `pgrp-gcp-dev-task01@sonmap.net` · 구성원 | Cloud Identity 권한 · 인터넷 송신 |
+| 2 | `-project` | 프로젝트 `gcp-sbx-edp-task01` · 결제 연결 · API | 프로젝트 ID 중복 · 결제 권한 |
+| 3 | `-project-iam` | 과제 서비스 계정 · 그룹 권한 | — |
+| 4 | `-data` | BigQuery `task01_main` · 버킷 `gcp-sbx-edp-task01-data` | 버킷 이름 중복 |
+| 5 | `-workload` | Namespace `sbx-general-task01` · 디스크 · Pod · Service | GKE 접속 · 이미지 받기 |
+
+
 ---
 
 ## 로그인 방식 (테스트 / 실연동)
