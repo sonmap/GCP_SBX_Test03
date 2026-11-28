@@ -265,6 +265,19 @@ gcloud artifacts docker images describe "${AR_REPO}/${JUPYTER_IMAGE}" \
   --format='value(image_summary.digest)'
 ```
 
+### 2-2 · 3 한 번에 · 권장
+
+2-2(요청 파일) · 점검 · 3(게시 · 실행)을 **스크립트 하나**로 합니다. 최신 릴리스 · 이미지 digest · 결제 계정 · **다음 요청 번호**를 스크립트가 알아서 정하므로 블록을 복사하다 생기는 실수(자리표시 · 번호 중복)가 없습니다.
+
+```bash
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+cd ~/GCP_SBX_Test03
+git pull -q origin main
+./03.sandbox_deploy/run-request.sh test-task01-general.json
+```
+
+task11 · task21 은 `test-task11-sa.json` · `test-task21-com.json` 으로 바꿉니다. 아래 2-2 · 3 은 같은 일을 단계별로 나눈 것입니다.
+
 ### 2-2. 요청 파일 만들기 (task01)
 
 예시를 `.local/` 로 복사하고 이미지 · `source` 를 채웁니다. `.local/` 은 git 에 올라가지 않습니다.
