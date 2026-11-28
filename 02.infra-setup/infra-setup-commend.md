@@ -2900,10 +2900,24 @@ GCP Sandbox JupyterHub 전환으로 SSL 인증서 프로비저닝을 위한 DNS 
 dig +short NS sonmap.net
 ```
 
-| 결과 | 운영 위치 | 등록 방법 |
-|---|---|---|
-| `ns-cloud-xN.googledomains.com.` | GCP Cloud DNS 공개 영역 | 아래 명령 |
-| 그 밖의 네임서버 | 도메인 등록 업체(Squarespace · Cloudflare · 가비아 등) 콘솔 | 콘솔에서 CNAME 추가. 이름은 `_acme-challenge_fahvn3ng4zlsxwxs.sbx` (업체가 `sonmap.net` 을 자동으로 붙이는 경우), 값은 아래 `--rrdatas` 값 |
+**`sonmap.net` 은 Squarespace Domains(예전 Google Domains)의 DNS 를 씁니다.** 네임서버가 `ns-cloud-c1 ~ c4.googledomains.com` 이지만 GCP 프로젝트의 Cloud DNS 영역이 아닙니다(2026-11-28 확인: admin 이 보는 모든 프로젝트에 `sonmap.net` 영역 없음). 네임서버 이름만으로는 Cloud DNS 와 Squarespace 를 구분할 수 없습니다.
+
+**Squarespace 에 등록 (sonmap.net)**
+
+1. https://domains.squarespace.com 에 `sonmap.net` 소유 계정으로 로그인 → `sonmap.net` → **DNS** → **DNS Settings**
+2. **Custom records** → **Add record**
+3. 아래 값 입력 후 **Save**. 기존 레코드(A · MX · TXT 등)는 건드리지 않습니다.
+
+| 칸 | 값 |
+|---|---|
+| Type | `CNAME` |
+| Name | `_acme-challenge_fahvn3ng4zlsxwxs.sbx` (`.sonmap.net` 은 자동으로 붙음) |
+| TTL | 기본값 |
+| Data | `b453a935-c98c-4bdb-b13d-f381dc3e6895.4.asia-northeast3.authorize.certificatemanager.goog` |
+
+내부 ALB 주소 `sbx.sonmap.net → 172.31.96.2` (A 레코드) 는 **여기에 넣지 않습니다.** 사설 IP 이므로 사내 DNS(3-32-2-2)에 등록합니다.
+
+다른 도메인이 GCP Cloud DNS 영역에 있는 경우에는 아래 명령으로 등록합니다.
 
 Cloud DNS 인 경우 — `sonmap.net` 공개 영역이 있는 프로젝트를 찾아 등록합니다.
 
