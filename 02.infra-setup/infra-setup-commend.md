@@ -2866,7 +2866,7 @@ Google은 공개 CNAME을 발급 및 자동 갱신 검증에 사용합니다. �
 
 ##### 3-32-2-1. 외부 DNS 요청서 · 공개 CNAME 등록
 
-아래 값은 이전 도메인(`jupyter-group01.sonmap.net`)에서 발급받은 형식 예시입니다. `sbx.sonmap.net` 은 3-32-2 명령으로 새 승인 값을 조회해 바꿔 씁니다. 운영 도메인은 3-32-4절에서 새로 조회한 값으로 작성합니다.
+아래 값은 `gcp-sbx-gke01` 의 `dns-auth-sbx` 가 발급한 실제 값입니다(2026-11-28 확인). DNS 승인을 지우고 다시 만들면 값이 바뀌므로 3-32-2 의 `describe` 로 다시 확인합니다. 운영 도메인은 3-32-4절에서 새로 조회한 값으로 작성합니다.
 
 ```text
 1.작업대상(외부DNS or 내부DNS) :
@@ -2874,8 +2874,8 @@ Google은 공개 CNAME을 발급 및 자동 갱신 검증에 사용합니다. �
 
 2.작업내용
 [등록]
-도메인명 : _acme-challenge_5zozaksz6rlqjhyf.sbx.sonmap.net
-IP 정보 : cce5034d-0b78-4be0-b365-ec97883d176a.2.asia-northeast3.authorize.certificatemanager.goog
+도메인명 : _acme-challenge_fahvn3ng4zlsxwxs.sbx.sonmap.net
+IP 정보 : b453a935-c98c-4bdb-b13d-f381dc3e6895.4.asia-northeast3.authorize.certificatemanager.goog
 TYPE : CNAME
 
 3.등록/변경/삭제 목적
@@ -2890,6 +2890,43 @@ GCP Sandbox JupyterHub 전환으로 SSL 인증서 프로비저닝을 위한 DNS 
 ```
 
 요청서의 `IP 정보` 칸에는 CNAME 대상의 전체 도메인명을 입력합니다. 위 양식에서는 출력 끝의 점을 뺐습니다. DNS 운영 도구가 절대 이름을 요구하면 끝의 점을 포함하고, DNS 영역 접미사가 중복으로 붙지 않았는지 확인합니다.
+
+##### 3-32-2-1-1. `sonmap.net` 공개 DNS 에 직접 등록할 때 (개인 테스트 환경)
+
+인증서 상태가 "`sbx.sonmap.net` 도메인에 CNAME 레코드가 없습니다" 이면 아직 이 레코드가 공개 DNS 에 없는 것입니다. 먼저 `sonmap.net` 의 공개 DNS 를 누가 운영하는지 확인합니다.
+
+```bash
+# 실행 위치: Cloud Shell 또는 아무 PC | 대상: 공개 DNS (조회) | 실행 계정: 불필요
+dig +short NS sonmap.net
+```
+
+| 결과 | 운영 위치 | 등록 방법 |
+|---|---|---|
+| `ns-cloud-xN.googledomains.com.` | GCP Cloud DNS 공개 영역 | 아래 명령 |
+| 그 밖의 네임서버 | 도메인 등록 업체(Squarespace · Cloudflare · 가비아 등) 콘솔 | 콘솔에서 CNAME 추가. 이름은 `_acme-challenge_fahvn3ng4zlsxwxs.sbx` (업체가 `sonmap.net` 을 자동으로 붙이는 경우), 값은 아래 `--rrdatas` 값 |
+
+Cloud DNS 인 경우 — `sonmap.net` 공개 영역이 있는 프로젝트를 찾아 등록합니다.
+
+```bash
+# 실행 위치: Cloud Shell | 대상: sonmap.net 공개 영역이 있는 프로젝트 | 실행 계정: admin@sonmap.net
+export DNS_PROJECT="<sonmap.net 공개 영역이 있는 프로젝트>"
+gcloud dns managed-zones list --project="$DNS_PROJECT" --account=admin@sonmap.net \
+  --filter='dnsName=sonmap.net. AND visibility=public' --format='table(name,dnsName,visibility)'
+export DNS_ZONE="<위 결과의 NAME>"
+gcloud dns record-sets create "_acme-challenge_fahvn3ng4zlsxwxs.sbx.sonmap.net." \
+  --zone="$DNS_ZONE" --project="$DNS_PROJECT" --account=admin@sonmap.net --type=CNAME --ttl=300 \
+  --rrdatas="b453a935-c98c-4bdb-b13d-f381dc3e6895.4.asia-northeast3.authorize.certificatemanager.goog."
+```
+
+등록 확인 — 공개 DNS 에서 값이 보이면 됩니다.
+
+```bash
+# 실행 위치: Cloud Shell 또는 아무 PC | 대상: 공개 DNS (조회) | 실행 계정: 불필요
+dig +short CNAME _acme-challenge_fahvn3ng4zlsxwxs.sbx.sonmap.net @8.8.8.8
+# b453a935-c98c-4bdb-b13d-f381dc3e6895.4.asia-northeast3.authorize.certificatemanager.goog.
+```
+
+인증서는 다시 만들 필요가 없습니다. Certificate Manager 가 주기적으로 다시 검증하므로, 레코드가 보이기 시작하면 보통 수십 분 안에 `ACTIVE` 가 됩니다(3-32-3 의 `describe`). 몇 시간이 지나도 `PROVISIONING` 이면 `dig` 결과의 값 끝 부분까지 정확한지 확인합니다.
 
 ##### 3-32-2-2. 내부 DNS 요청서 · 접속용 A 레코드 등록
 
