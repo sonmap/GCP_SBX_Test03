@@ -3563,13 +3563,16 @@ Pod 에서 나가는 방향은 환경에 맞게 따로 엽니다 — 로그인 �
 
 3-13 ~ 3-16 에서 만든 `jupyter-oauth-client-id` · `jupyter-oauth-client-secret` 을 그대로 씁니다. Runner 가 이 값을 과제 Namespace 의 Secret `hub-oauth` 로 복사하고, Hub 설정은 파일로 읽습니다. **값을 저장소 · 요청 JSON · Terraform 변수에 적지 않습니다.**
 
+`user01` 에는 Secret 값을 추가하는 권한(`secretmanager.versions.add`)이 없습니다(`PERMISSION_DENIED`). 값 등록은 **Cloud Shell 의 admin** 으로 합니다. 테스트(`dummy`)에서는 실수로 실행하지 않도록 주석 처리해 두었습니다.
+
 ```bash
-# 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+# oauth 로 바꿀 때만 주석을 해제합니다. 테스트(dummy)에서는 실행하지 않습니다.
+# 실행 위치: Cloud Shell | 대상: gcp-sbx-gke01 | 실행 계정: admin@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
-export ADMIN_ACCOUNT="user01@sonmap.net"
-# 값은 화면에 남지 않게 입력합니다.
-read -rs OAUTH_VALUE && printf '%s' "$OAUTH_VALUE" | gcloud secrets versions add jupyter-oauth-client-secret \
-  --project="${SBX_GKE_PROJECT}" --data-file=- --account="${ADMIN_ACCOUNT}"; unset OAUTH_VALUE
+export SECRET_ADMIN_ACCOUNT="admin@sonmap.net"
+# 값은 화면에 남지 않게 입력합니다. client-id 도 같은 방법으로 jupyter-oauth-client-id 에 넣습니다.
+# read -rs OAUTH_VALUE && printf '%s' "$OAUTH_VALUE" | gcloud secrets versions add jupyter-oauth-client-secret \
+#   --project="${SBX_GKE_PROJECT}" --data-file=- --account="${SECRET_ADMIN_ACCOUNT}"; unset OAUTH_VALUE
 ```
 
 로그인 서버에 등록할 콜백 주소는 과제의 `https://<host><base_path>hub/oauth_callback` 입니다. 로그인 서버 주소는 `provisioner-env.yaml` 의 `HUB_OAUTH_BASE_URL` 에 넣습니다.
