@@ -3378,8 +3378,67 @@ echo "DEPLOYMENT_NAME=${DEPLOYMENT_NAME}"
 
 기존 VM 의 data 디스크를 붙일 때 PV 와 PVC 가 같이 쓰는 클래스입니다. 새 디스크를 만들지 않도록 PV 를 이름으로 지정해 붙이며, 이 클래스는 **확장 허용과 보존 정책**을 위해 둡니다.
 
+#### 4-2-0. 클러스터 접속 확인 (kubectl 을 쓰는 4절 모든 블록의 전제)
+
+`kubectl` 이 `https://10.253.3.2/... EOF` · `couldn't get current server API group list` 로 실패하면 VM 이 컨트롤 플레인에 닿지 못한 것입니다. 아래 블록이 원인을 한 번에 보여 주고, 사설 엔드포인트용 kubeconfig 를 새로 받습니다.
+
 ```bash
-# 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net (3-18 에서 받은 kubeconfig)
+# 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export MAIN_CLUSTER="gke-sbx-main-an3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export CP_IP="10.253.3.2"
+export KUBECONFIG="$HOME/.kube/config-sbx"
+# ① 프록시 설정 확인 · 값이 나오면 사설 IP 요청이 프록시로 가서 EOF 가 납니다
+env | grep -i _proxy || echo "proxy 설정 없음"
+# ② VM 내부 IP → 승인 네트워크(172.31.10.0/24) 안이어야 함
+hostname -I
+# ③ 클러스터 엔드포인트 · 승인 네트워크
+gcloud container clusters describe "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" \
+  --format="yaml(privateClusterConfig.privateEndpoint,masterAuthorizedNetworksConfig,controlPlaneEndpointsConfig)"
+# ④ 컨트롤 플레인 443 포트 직접 확인 (프록시 우회)
+curl -sk --noproxy '*' -m 10 -o /dev/null -w 'CP 443 → %{http_code}\n' "https://${CP_IP}/version" || echo "CP 443 연결 실패"
+# ⑤ 사설 엔드포인트용 kubeconfig 받기 · 프록시 예외 추가
+gcloud container clusters get-credentials "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --internal-ip --account="${ADMIN_ACCOUNT}"
+export NO_PROXY="${CP_IP},10.253.3.0/28,${NO_PROXY:-}"
+export no_proxy="${NO_PROXY}"
+kubectl get ns
+```
+
+| 결과 | 원인 | 조치 |
+|---|---|---|
+| `kubectl get ns` 가 `default` · `kube-system` 출력 | 정상 | 4-2-1 로 |
+| ① 에 `https_proxy` 값이 있고 ④ 가 `401` · `403` · `200` | 프록시가 사설 IP 를 가로챔 | ⑤ 의 `NO_PROXY` 로 해결. 새 셸마다 `NO_PROXY` 줄을 다시 실행하거나 `~/.bashrc` 에 추가 |
+| ④ `CP 443 연결 실패` · 시간 초과 | VM 이 승인 네트워크 밖이거나 경로 없음 | ② 의 IP 가 ③ 의 `cidrBlocks` 안인지 확인 → 밖이면 아래 ⑥ |
+| ④ 가 `000` 이고 ② 의 IP 가 승인 범위 안 | 방화벽 · 피어링 경로 | VPC 담당자에게 `infra-son01 → 10.253.3.0/28 TCP 443` 확인 요청 |
+
+⑥ VM IP 가 승인 네트워크 밖일 때만 · VM 이 속한 대역을 추가합니다 (`VM_CIDR` 을 ② 결과에 맞게 바꿉니다).
+
+```bash
+# 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net | 가장: tf-manager
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export MAIN_CLUSTER="gke-sbx-main-an3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export ADMIN_CIDR="172.31.10.0/24"
+export VM_CIDR="172.31.10.0/24"   # ② 의 VM IP 가 속한 대역으로 변경
+gcloud container clusters update "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --enable-master-authorized-networks --master-authorized-networks="${ADMIN_CIDR},${VM_CIDR}" \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
+```
+
+#### 4-2-1. StorageClass 생성
+
+```bash
+# 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net (4-2-0 에서 받은 kubeconfig)
+export CP_IP="10.253.3.2"
+export KUBECONFIG="$HOME/.kube/config-sbx"
+export NO_PROXY="${CP_IP},10.253.3.0/28,${NO_PROXY:-}"
+export no_proxy="${NO_PROXY}"
 kubectl apply -f - <<'YAML'
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
