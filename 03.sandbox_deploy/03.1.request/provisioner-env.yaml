@@ -2,7 +2,8 @@
 SBX_GKE_PROJECT: gcp-sbx-gke01
 GCP_REGION: asia-northeast3
 GKE_CLUSTER_NAME: gke-sbx-main-an3
-GKE_ENDPOINT_MODE: dns
+# GKE 접속: internal = 컨트롤 플레인 사설 IP (10.253.3.2) · dns = DNS 엔드포인트 (Pool 이 인터넷으로 나가면 외부 허용 필요)
+GKE_ENDPOINT_MODE: internal
 WORKER_POOL: projects/gcp-sbx-gke01/locations/asia-northeast3/workerPools/pool-sbxtest01
 REQUEST_BUCKET: gcp-sbx-gke01-sbxtest01-requests
 BUNDLE_BUCKET: gcp-sbx-gke01-sbxtest01-bundles

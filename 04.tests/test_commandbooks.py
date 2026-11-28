@@ -134,7 +134,7 @@ esac
     def test_static_configs_match_runtime_targets_and_reference_files_exist(self):
         env = yaml.safe_load((ROOT / '03.sandbox_deploy/03.1.request/provisioner-env.yaml').read_text())
         self.assertEqual(env['SBX_GKE_PROJECT'], 'gcp-sbx-gke01')
-        self.assertEqual(env['GKE_ENDPOINT_MODE'], 'dns')
+        self.assertEqual(env['GKE_ENDPOINT_MODE'], 'internal')
         self.assertEqual(env['SBX_GKE_PROJECT'], 'gcp-sbx-gke01')
         build = yaml.safe_load((ROOT / '03.sandbox_deploy/03.3.gke/cloudbuild/bootstrap-build.yaml').read_text())
         self.assertEqual(build['options']['logging'], 'CLOUD_LOGGING_ONLY')
