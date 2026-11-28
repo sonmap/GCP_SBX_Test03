@@ -111,6 +111,44 @@ gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/releas
 
 과제 이름은 Namespace · 서비스 계정 · 버킷 이름에 들어가므로 **영문 소문자 · 숫자 · `-`** 만 씁니다.
 
+### 2-0. 테스트 Jupyter 이미지 만들기 (기존 과제 이미지가 없을 때)
+
+edge AR 에는 자동화 도구 이미지(`sbxtest01-automation-runner` · `run-sbxtest01-provisioner`)만 있고 **과제 Pod 용 Jupyter 이미지가 없습니다.** 테스트용 이미지 `sbxtest01-jupyter-test` 를 만듭니다. 내용은 [03.4.test-image/Dockerfile](03.4.test-image/Dockerfile) 과 같습니다 (JupyterHub 5 · JupyterLab · sudospawner · sudo · `jupyterhub` 그룹).
+
+빌드는 **Cloud Build 기본 풀**(인터넷 가능)에서 하므로 infra-son01 이 인터넷에 닿지 않아도, 저장소가 최신이 아니어도 됩니다.
+
+```bash
+# 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 (Cloud Build) · gcp-prod-edp-edge-509423 (AR) | 실행 계정: user01@sonmap.net | 가장: tf-manager
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
+cat > /tmp/build-jupyter-test.yaml <<YAML
+steps:
+- name: gcr.io/cloud-builders/docker
+  entrypoint: bash
+  args:
+  - -ceu
+  - |
+    cat > Dockerfile <<'DOCKERFILE'
+    FROM quay.io/jupyterhub/jupyterhub:5.2.1
+    RUN apt-get update && apt-get install -y --no-install-recommends sudo && rm -rf /var/lib/apt/lists/* && PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --no-cache-dir jupyterlab==4.2.5 sudospawner==0.5.2 && groupadd --force jupyterhub && mkdir -p /etc/jupyterhub /home/jupyter
+    CMD ["jupyterhub", "-f", "/etc/jupyterhub/jupyterhub_config.py"]
+    DOCKERFILE
+    docker build -t ${AR_REPO}/sbxtest01-jupyter-test:v1 .
+    docker push ${AR_REPO}/sbxtest01-jupyter-test:v1
+options:
+  logging: CLOUD_LOGGING_ONLY
+YAML
+gcloud builds submit --no-source --config=/tmp/build-jupyter-test.yaml \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
+  --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"
+```
+
+`STATUS SUCCESS` 이면 2-1 에서 `JUPYTER_IMAGE="sbxtest01-jupyter-test:v1"` 로 digest 를 확인합니다.
+
 ### 2-1. Jupyter 이미지 digest 확인
 
 요청에는 태그가 아니라 digest 를 적습니다. `JUPYTER_IMAGE` 를 edge AR 에 올린 이미지 이름:태그로 바꿉니다.
@@ -120,7 +158,7 @@ gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/releas
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
-export JUPYTER_IMAGE="<이미지 이름>:<태그>"
+export JUPYTER_IMAGE="sbxtest01-jupyter-test:v1"   # 2-0 에서 만든 테스트 이미지 (기존 과제 이미지면 그 이름:태그)
 gcloud artifacts docker images list "${AR_REPO}" --include-tags \
   --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
   --format="table(package.basename(),tags,version)"
@@ -141,7 +179,7 @@ export ADMIN_ACCOUNT="user01@sonmap.net"
 export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
 export REQUEST_ID="REQ-TEST-TASK01-001"   # 다시 요청할 때마다 번호를 올림 (002, 003 …)
 export EXAMPLE="test-task01-general.json"
-export JUPYTER_IMAGE_REF="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/<이미지 이름>@<2-1 의 sha256:…>"
+export JUPYTER_IMAGE_REF="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/sbxtest01-jupyter-test@<2-1 의 sha256:…>"
 mkdir -p .local
 gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/release.json" \
   --account="${ADMIN_ACCOUNT}" > .local/release.json
