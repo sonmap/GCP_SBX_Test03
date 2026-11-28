@@ -3091,7 +3091,16 @@ gcloud compute url-maps describe urlmap-alb-sbxtest01-shared \
   --format='yaml(hostRules)'
 ```
 
-아래 `CERT_REFS`는 `group01`만 연결하는 예시입니다. 공유 프록시가 다른 그룹도 서비스한다면 모든 호스트의 리전 Google 관리형 인증서를 `ACTIVE`로 준비하고, 해당 리소스 이름을 쉼표로 이어 붙입니다. 프록시 변경 시 전달한 목록 전체가 적용됩니다. [Google Cloud 인증서 연결 규칙](https://docs.cloud.google.com/load-balancing/docs/ssl-certificates#configuration_method_rules)
+**조회 결과 읽는 법**
+
+| 명령 | 결과 | 뜻 · 다음 |
+|---|---|---|
+| 프록시 `describe` | `was not found` | 아직 없음 → **3-33-1 신규 생성** |
+| 프록시 `describe` | 이름 · URL Map · 인증서 출력 | 이미 있음 → 인증서가 다르면 3-33-2 갱신, 같으면 3-34 로 |
+| URL Map `describe` | `null` | URL Map 은 있고(3-29), 호스트 규칙이 아직 없음. **정상**입니다. 과제 경로 규칙(`/general/task01/*` 등)은 2차 과제 배포가 추가합니다 |
+| URL Map `describe` | `was not found` | 3-29 를 먼저 실행 |
+
+아래 `CERT_REFS` 는 `sbx.sonmap.net` 인증서 하나를 연결합니다. 공유 프록시가 다른 도메인도 서비스한다면 모든 도메인의 리전 Google 관리형 인증서를 `ACTIVE` 로 준비하고, 해당 리소스 이름을 쉼표로 이어 붙입니다. 프록시 변경 시 전달한 목록 전체가 적용됩니다. [Google Cloud 인증서 연결 규칙](https://docs.cloud.google.com/load-balancing/docs/ssl-certificates#configuration_method_rules)
 
 ```bash
 # 실행 위치: infra-son01 (저장소 루트) | 대상: 로컬 파일 · 변수 | 실행 계정: 불필요
