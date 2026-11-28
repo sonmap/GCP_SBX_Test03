@@ -2322,7 +2322,7 @@ gcloud builds worker-pools describe pool-sbxtest01 \
   --format='value(state,privatePoolV1Config.networkConfig.peeredNetworkIpRange)'
 ```
 
-**테스트에서는 `--no-public-egress` 를 넣지 않습니다.** 이 옵션을 넣으면 작업자가 인터넷에 나가지 못해, `50-workload` 가 Kubernetes provider 를 `registry.terraform.io` 에서 받지 못하고 4-1 점검이 `curl: (28) Connection timed out` 으로 실패합니다. 이미 이 옵션으로 만들었다면 4-1-1 로 송신을 엽니다. 피어링(GKE · PSA 사설 접속)은 그대로 유지됩니다.
+**테스트에서는 `--no-public-egress` 를 넣지 않습니다.** 이 옵션을 넣으면 작업자가 인터넷에 나가지 못해, `50-workload` 가 Kubernetes provider 를 `registry.terraform.io` 에서 받지 못하고 4-1 점검이 `curl: (28) Connection timed out` 으로 실패합니다. 이미 이 옵션으로 만들었다면 4-1-1 에서 송신을 엽니다. 피어링(GKE · PSA 사설 접속)은 그대로 유지됩니다.
 
 <a name="17-3-상태-및-gke-접속-확인"></a>
 
@@ -3256,36 +3256,25 @@ cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 | `tf-manager` 의 `roles/container.admin` | Namespace · Pod · PV 생성 | 1-7절 |
 | Private Pool → `cloudidentity.googleapis.com` (신규 과제만) | `05-group` 이 그룹을 만듭니다. 이 API 는 Restricted VIP 에서 지원되지 않으므로, Pool 이 Google API 를 Restricted VIP 로만 내보내면 실패합니다 | 첫 신규 과제 배포에서 확인. 실패하면 그룹은 수동 생성하고 `manage_group: false` 로 요청 |
 
+#### 4-1-1. Pool 인터넷 송신 확인 · 열기 (레지스트리 점검 전에 먼저)
+
+레지스트리 점검(4-1-2)은 Pool 이 인터넷으로 나갈 수 있어야 성공합니다. 먼저 Pool 의 송신 설정을 확인합니다.
+
 ```bash
-# 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+# 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-sbx-gke01 (Pool) | 실행 계정: admin@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
-export ADMIN_ACCOUNT="user01@sonmap.net"
-export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
-# Private Pool 에서 Terraform 레지스트리에 닿는지 확인합니다.
-cat > /tmp/check-registry.yaml <<YAML
-steps:
-- name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-  entrypoint: bash
-  args: ["-c", "curl -sSf -o /dev/null -w '%{http_code}\\n' https://registry.terraform.io/v1/providers/hashicorp/kubernetes/versions"]
-options:
-  pool: {name: projects/${SBX_GKE_PROJECT}/locations/${REGION}/workerPools/pool-sbxtest01}
-  logging: CLOUD_LOGGING_ONLY
-YAML
-gcloud builds submit --no-source --config=/tmp/check-registry.yaml \
-  --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${ADMIN_ACCOUNT}" \
-  --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"
+export POOL_ADMIN_ACCOUNT="admin@sonmap.net"
+gcloud builds worker-pools describe pool-sbxtest01 \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${POOL_ADMIN_ACCOUNT}" \
+  --format='value(state,privatePoolV1Config.networkConfig.egressOption,privatePoolV1Config.networkConfig.peeredNetworkIpRange)'
 ```
 
-`200` 이 나오면 됩니다. `curl: (28) Connection timed out` · `000` 이 나오면 Pool 이 인터넷 송신 없이(`--no-public-egress`) 만들어진 것입니다 → **4-1-1**.
-
-#### 4-1-1. 레지스트리 점검 실패 시 · Pool 인터넷 송신 열기
-
-| 결과 | 원인 | 조치 |
+| 확인 결과 (두 번째 값) | 의미 | 조치 |
 |---|---|---|
-| `200` | 정상 | 4-1-1 건너뜀 |
-| `curl: (28) Connection timed out` · `000` | Pool 이 `--no-public-egress` | 아래 ① 실행 후 4-1 점검 다시 |
-| ① 이 `cannot be updated` · `INVALID_ARGUMENT` | 이 설정을 바꿀 수 없는 Pool | ② 삭제 후 재생성 |
+| `PUBLIC_EGRESS` 또는 비어 있음 | 송신 허용 | ① · ② 건너뛰고 **4-1-2** |
+| `NO_PUBLIC_EGRESS` | 송신 막힘 (`--no-public-egress` 로 생성) | **①** 실행 |
+| ① 이 `cannot be updated` · `INVALID_ARGUMENT` | 이 설정을 바꿀 수 없는 Pool | **②** 삭제 후 재생성 |
 
 **① 기존 Pool 송신 허용**
 
@@ -3323,7 +3312,36 @@ gcloud builds worker-pools create pool-sbxtest01 \
   --account="${POOL_ADMIN_ACCOUNT}"
 ```
 
-그다음 4-1 의 레지스트리 점검을 다시 실행해 `200` 을 확인합니다.
+#### 4-1-2. Private Pool → Terraform 레지스트리 점검
+
+4-1-1 에서 송신이 허용된 것을 확인한 뒤 실행합니다.
+
+```bash
+# 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+# Private Pool 에서 Terraform 레지스트리에 닿는지 확인합니다.
+cat > /tmp/check-registry.yaml <<YAML
+steps:
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+  entrypoint: bash
+  args: ["-c", "curl -sSf -o /dev/null -w '%{http_code}\\n' https://registry.terraform.io/v1/providers/hashicorp/kubernetes/versions"]
+options:
+  pool: {name: projects/${SBX_GKE_PROJECT}/locations/${REGION}/workerPools/pool-sbxtest01}
+  logging: CLOUD_LOGGING_ONLY
+YAML
+gcloud builds submit --no-source --config=/tmp/check-registry.yaml \
+  --project="${SBX_GKE_PROJECT}" --region="${REGION}" --account="${ADMIN_ACCOUNT}" \
+  --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"
+```
+
+| 결과 | 조치 |
+|---|---|
+| `200` | 정상 → 다음 State 확인 |
+| `curl: (28) Connection timed out` · `000` | Pool 송신이 막혀 있음 → 4-1-1 다시 확인 |
+| 4-1-1 이 `PUBLIC_EGRESS` 인데도 시간 초과 | 네트워크 담당자에게 `registry.terraform.io` · `releases.hashicorp.com` HTTPS 송신 허용 요청 |
 
 
 **State 확인**
