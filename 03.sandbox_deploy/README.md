@@ -31,62 +31,59 @@ flowchart LR
 
 `dummy` 는 내부 ALB 에 닿는 누구나 아무 이름으로 들어올 수 있습니다. 실제 과제 데이터를 붙인 상태에서는 쓰지 않습니다.
 
-## 0. 변수
+## 0. 시작 전 확인
+
+| 확인 | 어디서 | 상태 |
+|---|---|---|
+| 1차 인프라 3-34 · 4-1 ~ 4-4 완료 | [1차 명령서](../02.infra-setup/infra-setup-commend.md) | 4-1-2 레지스트리 `200` · 4-2-0 `kubectl get ns` 성공 |
+| 테스트용 Jupyter 이미지가 edge AR 에 있음 | `gcp-prod-edp-edge-509423/ar-sbxtest01-platform` | 2-1 에서 digest 확인 |
+| 결제 계정 | 1차 1-9 | `019BE7-53DD39-AF5098` (예시 파일에 이미 입력) |
+
+아래 블록은 모두 **infra-son01 의 `~/GCP_SBX_Test03`** 에서 순서대로 실행합니다. 블록마다 필요한 변수를 다시 선언하므로 앞 블록을 다시 실행할 필요가 없습니다.
+
+## 1. 릴리스 게시 (처음 한 번 · 코드가 바뀔 때마다)
+
+Runner 이미지, Provisioner 이미지, Terraform ZIP 을 같은 `RELEASE_ID` 로 게시하고 Cloud Run Provisioner 를 새 이미지로 바꿉니다. **커밋되지 않은 변경은 반영되지 않으므로** 먼저 `git pull` 로 `main` 과 맞춥니다.
 
 ```bash
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
+cd ~/GCP_SBX_Test03
+git pull -q origin main
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
-export ADMIN_ACCOUNT="user01@sonmap.net"
 export REGION="asia-northeast3"
-export TF_MANAGER="tf-manager@${SBX_GKE_PROJECT}.iam.gserviceaccount.com"
-export TF_MANAGER_RESOURCE="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}"
-export REQUEST_BUCKET="${SBX_GKE_PROJECT}-sbxtest01-requests"
-export BUNDLE_BUCKET="${SBX_GKE_PROJECT}-sbxtest01-bundles"
-export BUILD_STAGING_BUCKET="${SBX_GKE_PROJECT}-sbxtest01-build-source"
-```
-
-## 1. 릴리스 게시 (코드가 바뀔 때만)
-
-Runner 이미지(Terraform `50-workload` 포함), Provisioner 이미지, Terraform ZIP 을 같은 `RELEASE_ID` 로 게시합니다. 커밋하지 않은 변경은 반영되지 않습니다.
-
-```bash
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export BUILD_STAGING_BUCKET="gcp-sbx-gke01-sbxtest01-build-source"
 export COMMIT_SHA="$(git rev-parse HEAD)"
 export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
-git status --porcelain
-
-gcloud builds submit . --project="$SBX_GKE_PROJECT" --region="$REGION" \
-  --account="$ADMIN_ACCOUNT" --impersonate-service-account="$TF_MANAGER" \
-  --service-account="$TF_MANAGER_RESOURCE" \
+git status --porcelain   # 아무것도 안 나와야 함
+echo "RELEASE_ID=${RELEASE_ID}"
+gcloud builds submit . --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
+  --service-account="projects/${SBX_GKE_PROJECT}/serviceAccounts/${TF_MANAGER}" \
   --gcs-source-staging-dir="gs://${BUILD_STAGING_BUCKET}/source" \
   --config=03.sandbox_deploy/03.3.gke/cloudbuild/platform-release.yaml \
   --substitutions="_RELEASE_ID=${RELEASE_ID},_COMMIT_SHA=${COMMIT_SHA}"
-
-gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/release.json" \
-  --account="$ADMIN_ACCOUNT"
 ```
 
-출력의 `release_id` · `archive_uri` · `generation` · `sha256` 을 요청 JSON 의 `source` 에 넣습니다.
+빌드 마지막에 `PLATFORM RELEASE READY` 가 나오면 성공입니다. 결과 파일을 확인합니다.
+
+```bash
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+cd ~/GCP_SBX_Test03
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export BUNDLE_BUCKET="gcp-sbx-gke01-sbxtest01-bundles"
+export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
+gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/release.json" --account="${ADMIN_ACCOUNT}"
+```
+
+출력의 `release_id` · `archive_uri` · `generation` · `sha256` 을 2-2 에서 요청 JSON 의 `source` 에 넣습니다.
 
 ## 2. 요청 JSON 작성
 
-[examples](03.1.request/examples/) 에서 복사해 값을 채웁니다. 형식은 [요청 형식](03.1.request/README.md)을 봅니다.
-
-```bash
-export REQUEST_ID="REQ-RSCH-20261126-01"
-mkdir -p .local
-cp 03.sandbox_deploy/03.1.request/examples/migrated-task.json ".local/${REQUEST_ID}.json"
-# request_id, approval, 과제 값, source 를 수정
-```
-
-이미지는 태그가 아니라 digest 로 적습니다.
-
-```bash
-gcloud artifacts docker images describe "<저장소>/<이미지>:<태그>" \
-  --account="$ADMIN_ACCOUNT" --format='value(image_summary.digest)'
-```
-
 ### 테스트 과제 3개
 
-한 주소(`sbx.sonmap.net`) 아래에 영역별로 과제 하나씩 배치합니다. 요청 파일은 [examples](03.1.request/examples/) 의 `test-*.json` 입니다.
+한 주소(`sbx.sonmap.net`) 아래에 영역별로 과제 하나씩 배치합니다. **task01 하나로 먼저 끝까지 확인**한 뒤 나머지를 합니다.
 
 | 영역 | 과제 | 접속 주소 | Namespace | 요청 파일 |
 |---|---|---|---|---|
@@ -94,52 +91,115 @@ gcloud artifacts docker images describe "<저장소>/<이미지>:<태그>" \
 | sa | task11 | `https://sbx.sonmap.net/sa/task11/` | `sbx-sa-task11` | `test-task11-sa.json` |
 | com | task21 | `https://sbx.sonmap.net/com/task21/` | `sbx-com-task21` | `test-task21-com.json` |
 
-과제 이름은 Namespace · 서비스 계정 · 버킷 이름에 들어가므로 **영문 소문자 · 숫자 · `-`** 만 씁니다. "과제01" 은 `task01` 로 적습니다.
+과제 이름은 Namespace · 서비스 계정 · 버킷 이름에 들어가므로 **영문 소문자 · 숫자 · `-`** 만 씁니다.
 
-각 파일에서 채울 값
+### 2-1. Jupyter 이미지 digest 확인
 
-- `containers[0].image` · `replace-me-jupyter@sha256:000…` 을 edge AR 의 실제 Jupyter 이미지 digest 로 바꿉니다.
-- `project.billing_account` · 결제 계정 번호
-- `source` · 1번 릴리스 게시 결과
-- `project.project_id` (`gcp-sbx-edp-task01` 등) 가 이미 다른 곳에서 쓰이면 바꿉니다. 프로젝트 ID 는 전 세계에서 하나뿐이어야 합니다.
+요청에는 태그가 아니라 digest 를 적습니다. `JUPYTER_IMAGE` 를 edge AR 에 올린 이미지 이름:태그로 바꿉니다.
 
-세 과제는 같은 URL Map 에 경로 규칙 3개로 들어갑니다. 한 번에 하나씩 실행하는 것이 안전합니다.
+```bash
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net | 가장: tf-manager
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
+export JUPYTER_IMAGE="<이미지 이름>:<태그>"
+gcloud artifacts docker images list "${AR_REPO}" --include-tags \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
+  --format="table(package.basename(),tags,version)"
+gcloud artifacts docker images describe "${AR_REPO}/${JUPYTER_IMAGE}" \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" \
+  --format='value(image_summary.digest)'
+```
+
+### 2-2. 요청 파일 만들기 (task01)
+
+예시를 `.local/` 로 복사하고 이미지 · `source` 를 채웁니다. `.local/` 은 git 에 올라가지 않습니다.
+
+```bash
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+cd ~/GCP_SBX_Test03
+export BUNDLE_BUCKET="gcp-sbx-gke01-sbxtest01-bundles"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
+export REQUEST_ID="REQ-TEST-TASK01-001"   # 다시 요청할 때마다 번호를 올림 (002, 003 …)
+export EXAMPLE="test-task01-general.json"
+export JUPYTER_IMAGE_REF="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/<이미지 이름>@<2-1 의 sha256:…>"
+mkdir -p .local
+gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/release.json" \
+  --account="${ADMIN_ACCOUNT}" > .local/release.json
+python3 - "03.sandbox_deploy/03.1.request/examples/${EXAMPLE}" .local/release.json \
+  "${REQUEST_ID}" "${JUPYTER_IMAGE_REF}" ".local/${REQUEST_ID}.json" <<'PY'
+import json, sys
+src, rel, req_id, image, out = sys.argv[1:]
+request = json.load(open(src))
+release = json.load(open(rel))
+request["request_id"] = req_id
+request["workload"]["containers"][0]["image"] = image
+request["source"] = {k: release[k] for k in ("release_id", "archive_uri", "generation", "sha256")}
+json.dump(request, open(out, "w"), indent=2, ensure_ascii=False)
+print("written", out)
+PY
+grep -n '"image"\|"release_id"\|"billing_account"\|"request_id"' ".local/${REQUEST_ID}.json"
+```
+
+`project.project_id` (`gcp-sbx-edp-task01` 등)는 전 세계에서 하나뿐이어야 합니다. 3번에서 `already exists` 로 실패하면 예시 파일의 프로젝트 ID 를 바꿉니다.
 
 ## 3. 게시와 실행
 
 ```bash
-REQUEST_URI="gs://${REQUEST_BUCKET}/approved/${REQUEST_ID}/request.json"
-gcloud storage cp --if-generation-match=0 ".local/${REQUEST_ID}.json" "$REQUEST_URI" --account="$ADMIN_ACCOUNT"
-
-GENERATION="$(gcloud storage objects describe "$REQUEST_URI" --account="$ADMIN_ACCOUNT" --format='value(generation)')"
-SHA256="$(sha256sum ".local/${REQUEST_ID}.json" | cut -d' ' -f1)"
-
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+cd ~/GCP_SBX_Test03
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export REQUEST_BUCKET="gcp-sbx-gke01-sbxtest01-requests"
+export REQUEST_ID="REQ-TEST-TASK01-001"   # 2-2 와 같은 값
+export REQUEST_URI="gs://${REQUEST_BUCKET}/approved/${REQUEST_ID}/request.json"
+gcloud storage cp --if-generation-match=0 ".local/${REQUEST_ID}.json" "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}"
+export GENERATION="$(gcloud storage objects describe "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}" --format='value(generation)')"
+export SHA256="$(sha256sum ".local/${REQUEST_ID}.json" | cut -d' ' -f1)"
 gcloud workflows run workflow-sbxtest01-provision \
-  --project="$SBX_GKE_PROJECT" --location="$REGION" --account="$ADMIN_ACCOUNT" \
+  --project="${SBX_GKE_PROJECT}" --location="${REGION}" --account="${ADMIN_ACCOUNT}" \
   --data="{\"request_id\":\"${REQUEST_ID}\",\"approved_json_uri\":\"${REQUEST_URI}\",\"generation\":${GENERATION},\"sha256\":\"${SHA256}\"}"
 ```
 
-`412` 는 같은 `request_id` 가 이미 게시됐다는 뜻입니다. 내용을 바꿨다면 번호를 올립니다.
+| 결과 | 의미 |
+|---|---|
+| `state: SUCCEEDED` | **접수** 완료. 실제 작업은 4번의 Cloud Build 에서 진행 |
+| `412` · `Precondition` | 같은 `request_id` 가 이미 게시됨 → 2-2 에서 `REQUEST_ID` 번호를 올려 다시 |
+| `FAILED` + 검증 메시지 | 요청 값 오류 → 메시지대로 2-2 수정 후 번호를 올려 다시 |
 
 ## 4. 결과 확인
 
-Workflow 의 `SUCCEEDED` 는 **접수**입니다. 실제 작업은 Cloud Build 에서 진행됩니다.
-
 ```bash
-gcloud builds list --project="$SBX_GKE_PROJECT" --region="$REGION" \
-  --account="$ADMIN_ACCOUNT" --limit=5 --format='table(id,status,createTime)'
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export TASK_NAME="task01"
+# ① 빌드 목록 (최근 5개)
+gcloud builds list --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" --limit=5 --format='table(id,status,createTime)'
+# ② 이 과제의 Infrastructure Manager 배포 (단계마다 1개)
+gcloud infra-manager deployments list --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
+  --filter="labels.task=${TASK_NAME}" --format="table(name.basename(),state,labels.stage)" \
+  --account="${ADMIN_ACCOUNT}"
 ```
 
-Terraform 로그는 Infrastructure Manager 배포의 리비전에서, ALB 로그는 이 빌드의 `alb` 단계에서 봅니다.
-
 ```bash
-gcloud builds log "<빌드 ID>" --project="$SBX_GKE_PROJECT" --region="$REGION" \
-  --account="$ADMIN_ACCOUNT" 2>&1 | tail -50
-gcloud infra-manager deployments list --project="$SBX_GKE_PROJECT" --location="$REGION" \
-  --filter="labels.task=<과제>" --account="$ADMIN_ACCOUNT"
+# 실행 위치: infra-son01 · ~/GCP_SBX_Test03 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export BUILD_ID="<① 의 가장 최근 ID>"
+gcloud builds log "${BUILD_ID}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" 2>&1 | tail -50
 ```
 
-마지막 줄이 `[OK] Sandbox <과제> reconcile complete` 이면 끝입니다. 접속 주소는 `https://<host><base_path>` 입니다.
+마지막 줄이 `[OK] Sandbox task01 reconcile complete` 이면 끝입니다. 접속 주소는 `https://sbx.sonmap.net/general/task01/` 입니다. 실패하면 로그 마지막 50줄을 그대로 보내 주세요.
 
 ---
 
