@@ -3251,7 +3251,7 @@ cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 | 조건 | 이유 | 확인 |
 |---|---|---|
 | Private Pool → `registry.terraform.io` · `releases.hashicorp.com` HTTPS | Kubernetes provider 는 Google 관리 provider 가 아니라 실행할 때 내려받습니다 | 아래 점검 빌드 |
-| Private Pool → GKE DNS 엔드포인트 | Terraform 이 kubeconfig 없이 접근 토큰으로 클러스터에 접속합니다 | [Private Pool GKE 접속 점검](reference/cloudbuild-private-gke-vpn-design.md) |
+| Private Pool → GKE DNS 엔드포인트 | Terraform 이 kubeconfig 없이 접근 토큰으로 클러스터에 접속합니다. Pool 이 인터넷 송신으로 나가면 외부 접속 허용이 필요합니다 | 4-1-4 |
 | `tf-manager` 의 `roles/container.admin` | Namespace · Pod · PV 생성 | 1-7절 |
 | Private Pool → `cloudidentity.googleapis.com` (신규 과제만) | `05-group` 이 그룹을 만듭니다. 이 API 는 Restricted VIP 에서 지원되지 않으므로, Pool 이 Google API 를 Restricted VIP 로만 내보내면 실패합니다 | 첫 신규 과제 배포에서 확인. 실패하면 그룹은 수동 생성하고 `manage_group: false` 로 요청 |
 
@@ -3388,6 +3388,40 @@ gcloud builds worker-pools describe pool-sbxtest01 --project="${SBX_GKE_PROJECT}
 ```
 
 `gcp-sbx-gke01` 확인값: `Concurrent Private Pool Build CPUs` = **4** → `e2-standard-4` 는 1대만 떠서 교착, `e2-standard-2` 는 2대(4 vCPU)가 떠서 정상. `RUNNING  e2-standard-2` 이면 2차 문서의 요청을 **번호를 올려** 다시 게시합니다. 취소된 Infrastructure Manager 배포는 다음 실행에서 이어서 적용됩니다. 2 vCPU 로도 멈추면 ① 의 할당량 값을 보고 콘솔 **IAM 및 관리자 → 할당량**에서 Cloud Build Private Pool 동시 vCPU 증설을 요청합니다.
+
+#### 4-1-4. GKE DNS 엔드포인트 외부 접속 허용 · `50-workload` 가 `403 (Forbidden)` HTML 로 실패할 때
+
+`50-workload` 의 Kubernetes provider 는 클러스터의 **DNS 엔드포인트**(`gke-….gke.goog`)로 접속합니다. Private Pool 은 인터넷 송신(4-1-1)으로 나가므로 이 요청은 VPC **밖**에서 온 것으로 처리됩니다. 클러스터가 `allowExternalTraffic: false` 이면 Google 403 오류 페이지(`<title>Error 403 (Forbidden)!!1</title> … (post namespaces)`)로 거절됩니다.
+
+```mermaid
+flowchart LR
+    P["Private Pool<br/>Terraform kubernetes provider"] -->|"인터넷 송신"| D["DNS 엔드포인트<br/>gke-….gke.goog"]
+    D -->|"allowExternalTraffic: false"| X["403 Forbidden"]
+    D -->|"allowExternalTraffic: true<br/>+ IAM (container.clusters.connect)"| K["GKE API · Namespace 생성"]
+```
+
+외부 접속을 허용해도 **IAM 권한(`container.clusters.connect`)이 있는 계정만** 들어올 수 있습니다. 공개 IP 엔드포인트는 계속 꺼져 있습니다.
+
+```bash
+# 실행 위치: infra-son01 | 대상: 클러스터 gke-sbx-main-an3 (gcp-sbx-gke01) | 실행 계정: user01@sonmap.net | 가장: tf-manager
+export SBX_GKE_PROJECT="gcp-sbx-gke01"
+export REGION="asia-northeast3"
+export MAIN_CLUSTER="gke-sbx-main-an3"
+export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+gcloud container clusters update "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --enable-dns-access \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
+# 확인 → allowExternalTraffic: true · enablePublicEndpoint: false
+gcloud container clusters describe "${MAIN_CLUSTER}" --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
+  --account="${ADMIN_ACCOUNT}" \
+  --format="yaml(controlPlaneEndpointsConfig.dnsEndpointConfig.allowExternalTraffic,controlPlaneEndpointsConfig.ipEndpointsConfig.enablePublicEndpoint)"
+```
+
+| 선택 | 내용 |
+|---|---|
+| 테스트 (위 명령) | DNS 엔드포인트 외부 허용 · IAM 으로만 보호 |
+| 운영 (폐쇄망) | 인터넷 송신 없이 사설 IP 로 접속: `provisioner-env.yaml` 의 `GKE_ENDPOINT_MODE: internal` + 승인 네트워크에 Pool 대역(4-2-0 ⑥) · 릴리스 다시 게시 |
 
 **State 확인 (2차 배포 후에만 · 지금은 건너뜀)**
 
