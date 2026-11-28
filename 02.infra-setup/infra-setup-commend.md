@@ -3100,7 +3100,7 @@ gcloud compute url-maps describe urlmap-alb-sbxtest01-shared \
 | URL Map `describe` | `null` | URL Map 은 있고(3-29), 호스트 규칙이 아직 없음. **정상**입니다. 과제 경로 규칙(`/general/task01/*` 등)은 2차 과제 배포가 추가합니다 |
 | URL Map `describe` | `was not found` | 3-29 를 먼저 실행 |
 
-아래 `CERT_REFS` 는 `sbx.sonmap.net` 인증서 하나를 연결합니다. 공유 프록시가 다른 도메인도 서비스한다면 모든 도메인의 리전 Google 관리형 인증서를 `ACTIVE` 로 준비하고, 해당 리소스 이름을 쉼표로 이어 붙입니다. 프록시 변경 시 전달한 목록 전체가 적용됩니다. [Google Cloud 인증서 연결 규칙](https://docs.cloud.google.com/load-balancing/docs/ssl-certificates#configuration_method_rules)
+아래 `CERT_REFS` 는 `sbx.sonmap.net` 인증서 하나를 연결합니다. **인증서 이름만 넣습니다**(`cert-sbx-managed`). `projects/…/certificates/…` 전체 경로를 넣으면 gcloud 가 앞에 경로를 한 번 더 붙여 `Invalid value for field 'resource.sslCertificates[0]'` 오류가 납니다. 공유 프록시가 다른 도메인도 서비스한다면 모든 도메인의 리전 Google 관리형 인증서를 `ACTIVE` 로 준비하고, 이름을 쉼표로 이어 붙입니다. 프록시 변경 시 전달한 목록 전체가 적용됩니다. [Google Cloud 인증서 연결 규칙](https://docs.cloud.google.com/load-balancing/docs/ssl-certificates#configuration_method_rules)
 
 ```bash
 # 실행 위치: infra-son01 (저장소 루트) | 대상: 로컬 파일 · 변수 | 실행 계정: 불필요
@@ -3108,7 +3108,7 @@ cd ~/GCP_SBX_Test03   # 저장소 루트에서 실행 (상대 경로 사용)
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export MANAGED_CERT="cert-sbx-managed"
-export CERT_REFS="projects/${SBX_GKE_PROJECT}/locations/${REGION}/certificates/${MANAGED_CERT}"
+export CERT_REFS="${MANAGED_CERT}"   # 이름만. 전체 경로를 넣으면 gcloud 가 경로를 한 번 더 붙여 Invalid value 오류
 ```
 
 #### 3-33-1. 신규 프록시 생성
@@ -3121,7 +3121,7 @@ export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
-export CERT_REFS="projects/gcp-sbx-gke01/locations/asia-northeast3/certificates/cert-sbx-managed"
+export CERT_REFS="cert-sbx-managed"   # 이름만. gcloud 가 --project · --region 으로 전체 경로를 만듭니다
 gcloud compute target-https-proxies create https-proxy-alb-sbxtest01-shared \
   --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
   --url-map="projects/${SBX_GKE_PROJECT}/regions/${REGION}/urlMaps/urlmap-alb-sbxtest01-shared" \
@@ -3139,7 +3139,7 @@ export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
-export CERT_REFS="projects/gcp-sbx-gke01/locations/asia-northeast3/certificates/cert-sbx-managed"
+export CERT_REFS="cert-sbx-managed"   # 이름만. gcloud 가 --project · --region 으로 전체 경로를 만듭니다
 gcloud compute target-https-proxies update https-proxy-alb-sbxtest01-shared \
   --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
   --certificate-manager-certificates="${CERT_REFS}" \
