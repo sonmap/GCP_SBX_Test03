@@ -177,9 +177,18 @@ cd ~/GCP_SBX_Test03
 export BUNDLE_BUCKET="gcp-sbx-gke01-sbxtest01-bundles"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export RELEASE_ID="git-$(git rev-parse --short=12 HEAD)"
-export REQUEST_ID="REQ-TEST-TASK01-001"   # 다시 요청할 때마다 번호를 올림 (002, 003 …)
+export REQUEST_ID="REQ-TEST-TASK01-002"   # 게시할 때마다 번호를 올림. 001 은 첫 시도(이미지 오류)에 사용됨
 export EXAMPLE="test-task01-general.json"
-export JUPYTER_IMAGE_REF="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform/sbxtest01-jupyter-test@<2-1 의 sha256:…>"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
+export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
+export JUPYTER_IMAGE_NAME="sbxtest01-jupyter-test"   # 2-0 테스트 이미지 (기존 과제 이미지면 그 이름)
+export JUPYTER_IMAGE_TAG="v1"
+# digest 를 자동으로 조회합니다. 비어 있으면 2-0 빌드가 안 된 것이므로 중단합니다.
+export JUPYTER_DIGEST="$(gcloud artifacts docker images describe "${AR_REPO}/${JUPYTER_IMAGE_NAME}:${JUPYTER_IMAGE_TAG}" \
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" --format='value(image_summary.digest)')"
+echo "JUPYTER_DIGEST=${JUPYTER_DIGEST}"
+[[ "${JUPYTER_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "digest 없음 → 2-0 을 먼저 실행"; return 1 2>/dev/null || exit 1; }
+export JUPYTER_IMAGE_REF="${AR_REPO}/${JUPYTER_IMAGE_NAME}@${JUPYTER_DIGEST}"
 mkdir -p .local
 gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/release.json" \
   --account="${ADMIN_ACCOUNT}" > .local/release.json
@@ -210,7 +219,7 @@ export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export REQUEST_BUCKET="gcp-sbx-gke01-sbxtest01-requests"
-export REQUEST_ID="REQ-TEST-TASK01-001"   # 2-2 와 같은 값
+export REQUEST_ID="REQ-TEST-TASK01-002"   # 2-2 와 같은 값
 export REQUEST_URI="gs://${REQUEST_BUCKET}/approved/${REQUEST_ID}/request.json"
 gcloud storage cp --if-generation-match=0 ".local/${REQUEST_ID}.json" "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}"
 export GENERATION="$(gcloud storage objects describe "${REQUEST_URI}" --account="${ADMIN_ACCOUNT}" --format='value(generation)')"
@@ -224,7 +233,7 @@ gcloud workflows run workflow-sbxtest01-provision \
 |---|---|
 | `state: SUCCEEDED` | **접수** 완료. 실제 작업은 4번의 Cloud Build 에서 진행 |
 | `412` · `Precondition` | 같은 `request_id` 가 이미 게시됨 → 2-2 에서 `REQUEST_ID` 번호를 올려 다시 |
-| `FAILED` + 검증 메시지 | 요청 값 오류 → 메시지대로 2-2 수정 후 번호를 올려 다시 |
+| `FAILED` + `request schema validation failed` | 요청 값 오류 → 메시지의 항목을 고쳐 2-2 를 **번호를 올려** 다시 (예: `image` 에 `<…>` 가 남음 = digest 미입력) |
 
 ## 4. 결과 확인
 
