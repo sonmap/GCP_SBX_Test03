@@ -2303,7 +2303,7 @@ Pool 작업자 IP 는 PSA 예약 `10.250.0.0/24` 안에서 **`10.250.0.0/29` 만
 | `/29` (이 설정) | 8개 (사용 6개) | **6대** |
 | `/24` (기본값) | 256개 (사용 254개) | 254대 |
 
-과제 요청 하나가 Pool 작업자를 **동시에 2대** 씁니다(배포 빌드 1대 + 그 안에서 실행되는 Infrastructure Manager 빌드 1대). 작업자는 **`e2-standard-2` (2 vCPU)** 로 만듭니다. 새 프로젝트의 Private Pool 동시 vCPU 할당량이 작으면 4 vCPU 작업자 2대가 동시에 뜨지 못해, 바깥 빌드가 안쪽 Infrastructure Manager 빌드를 기다리며 멈춥니다(4-1-3). 그래서 `/29` 에서는 **과제 3개 정도까지 동시에** 처리되고, 넘치는 빌드는 대기열에서 기다립니다. 테스트에는 충분합니다. `/29` 가 Cloud Build 가 허용하는 가장 작은 범위이고, **Pool 을 만든 뒤에는 범위를 바꿀 수 없으므로** 늘리려면 Pool 을 다시 만들어야 합니다.
+과제 요청 하나가 Pool 작업자를 **동시에 2대** 씁니다(배포 빌드 1대 + 그 안에서 실행되는 Infrastructure Manager 빌드 1대). 작업자는 **`e2-standard-2` (2 vCPU)** 로 만듭니다. 새 프로젝트의 Private Pool 동시 vCPU 할당량이 작으면 4 vCPU 작업자 2대가 동시에 뜨지 못해, 바깥 빌드가 안쪽 Infrastructure Manager 빌드를 기다리며 멈춥니다(4-1-3). 주소로는 `/29` 에서 과제 3개까지 동시에 가능하지만, **실제 한도는 vCPU 할당량**입니다. `gcp-sbx-gke01` 의 `Concurrent Private Pool Build CPUs` 는 **4** 이므로 `e2-standard-2` 2대 = **과제 1개씩** 처리되고, 다음 과제는 대기열에서 기다립니다. 과제 3개를 동시에 돌리려면 할당량을 12 이상으로 늘립니다. 테스트에는 충분합니다. `/29` 가 Cloud Build 가 허용하는 가장 작은 범위이고, **Pool 을 만든 뒤에는 범위를 바꿀 수 없으므로** 늘리려면 Pool 을 다시 만들어야 합니다.
 
 ```bash
 # 실행 위치: Cloud Shell 또는 infra-son01 | 대상: gcp-sbx-gke01 (Pool) · gcp-prod-edp-hub-vpchost (피어링 VPC) | 실행 계정: admin@sonmap.net
@@ -3387,7 +3387,7 @@ gcloud builds worker-pools describe pool-sbxtest01 --project="${SBX_GKE_PROJECT}
   --account="${POOL_ADMIN_ACCOUNT}" --format='value(state,privatePoolV1Config.workerConfig.machineType)'
 ```
 
-`RUNNING  e2-standard-2` 이면 2차 문서의 요청을 **번호를 올려** 다시 게시합니다. 취소된 Infrastructure Manager 배포는 다음 실행에서 이어서 적용됩니다. 2 vCPU 로도 멈추면 ① 의 할당량 값을 보고 콘솔 **IAM 및 관리자 → 할당량**에서 Cloud Build Private Pool 동시 vCPU 증설을 요청합니다.
+`gcp-sbx-gke01` 확인값: `Concurrent Private Pool Build CPUs` = **4** → `e2-standard-4` 는 1대만 떠서 교착, `e2-standard-2` 는 2대(4 vCPU)가 떠서 정상. `RUNNING  e2-standard-2` 이면 2차 문서의 요청을 **번호를 올려** 다시 게시합니다. 취소된 Infrastructure Manager 배포는 다음 실행에서 이어서 적용됩니다. 2 vCPU 로도 멈추면 ① 의 할당량 값을 보고 콘솔 **IAM 및 관리자 → 할당량**에서 Cloud Build Private Pool 동시 vCPU 증설을 요청합니다.
 
 **State 확인 (2차 배포 후에만 · 지금은 건너뜀)**
 
