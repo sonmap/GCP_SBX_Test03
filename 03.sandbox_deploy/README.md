@@ -256,7 +256,7 @@ gcloud builds list --project="${SBX_GKE_PROJECT}" --region="${REGION}" \
 # ② 이 과제의 Infrastructure Manager 배포 (단계마다 1개)
 gcloud infra-manager deployments list --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
   --filter="labels.task=${TASK_NAME}" --format="table(name.basename(),state,labels.stage)" \
-  --account="${ADMIN_ACCOUNT}"
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"   # user01 은 배포 조회 권한이 없어 tf-manager 로 조회
 ```
 
 ```bash

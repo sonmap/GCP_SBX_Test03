@@ -3353,18 +3353,20 @@ gcloud builds submit --no-source --config=/tmp/check-registry.yaml \
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
+export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"   # user01 은 배포 조회 권한이 없어 tf-manager 로 조회
 export TASK_NAME="task01"   # 요청 JSON 의 task.name (예: task01 · task11 · task21)
 # ① 이 과제의 배포 목록 (단계마다 1개)
 gcloud infra-manager deployments list --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
   --filter="labels.task=${TASK_NAME}" --format="table(name.basename(),state,labels.stage,latestRevision.basename())" \
-  --account="${ADMIN_ACCOUNT}"
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}"
 # ② workload 단계 State 내려받기 (목록이 비어 있으면 건너뜀)
 export DEPLOYMENT_NAME="$(gcloud infra-manager deployments list --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
   --filter="labels.task=${TASK_NAME} AND labels.stage=workload" --format="value(name.basename())" \
-  --account="${ADMIN_ACCOUNT}" | head -n1)"
+  --account="${ADMIN_ACCOUNT}" --impersonate-service-account="${TF_MANAGER}" | head -n1)"
 echo "DEPLOYMENT_NAME=${DEPLOYMENT_NAME}"
 [ -n "${DEPLOYMENT_NAME}" ] && gcloud infra-manager deployments export-statefile \
-  "projects/${SBX_GKE_PROJECT}/locations/${REGION}/deployments/${DEPLOYMENT_NAME}" --account="${ADMIN_ACCOUNT}"
+  "projects/${SBX_GKE_PROJECT}/locations/${REGION}/deployments/${DEPLOYMENT_NAME}" --account="${ADMIN_ACCOUNT}" \
+  --impersonate-service-account="${TF_MANAGER}"
 ```
 
 | 결과 | 의미 |
