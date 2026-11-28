@@ -179,6 +179,7 @@ export ADMIN_ACCOUNT="user01@sonmap.net"
 export RELEASE_ID="git-b81578a90f53"   # 1번 출력의 release_id (문서만 바뀐 커밋은 다시 게시하지 않으므로 HEAD 와 다를 수 있음)
 export REQUEST_ID="REQ-TEST-TASK01-002"   # 게시할 때마다 번호를 올림. 001 은 첫 시도(이미지 오류)에 사용됨
 export EXAMPLE="test-task01-general.json"
+export BILLING_ACCOUNT="019BE7-53DD39-AF5098"   # sonmap_billing (1차 1-9)
 export TF_MANAGER="tf-manager@gcp-sbx-gke01.iam.gserviceaccount.com"
 export AR_REPO="asia-northeast3-docker.pkg.dev/gcp-prod-edp-edge-509423/ar-sbxtest01-platform"
 export JUPYTER_IMAGE_NAME="sbxtest01-jupyter-test"   # 2-0 테스트 이미지 (기존 과제 이미지면 그 이름)
@@ -197,13 +198,14 @@ mkdir -p .local
 gcloud storage cat "gs://${BUNDLE_BUCKET}/platform-releases/${RELEASE_ID}/release.json" \
   --account="${ADMIN_ACCOUNT}" > .local/release.json
 [ -n "${JUPYTER_IMAGE_REF}" ] && python3 - "03.sandbox_deploy/03.1.request/examples/${EXAMPLE}" .local/release.json \
-  "${REQUEST_ID}" "${JUPYTER_IMAGE_REF}" ".local/${REQUEST_ID}.json" <<'PY'
+  "${REQUEST_ID}" "${JUPYTER_IMAGE_REF}" ".local/${REQUEST_ID}.json" "${BILLING_ACCOUNT}" <<'PY'
 import json, sys
-src, rel, req_id, image, out = sys.argv[1:]
+src, rel, req_id, image, out, billing = sys.argv[1:]
 request = json.load(open(src))
 release = json.load(open(rel))
 request["request_id"] = req_id
 request["workload"]["containers"][0]["image"] = image
+request["project"]["billing_account"] = billing
 request["source"] = {k: release[k] for k in ("release_id", "archive_uri", "generation", "sha256")}
 json.dump(request, open(out, "w"), indent=2, ensure_ascii=False)
 print("written", out)
