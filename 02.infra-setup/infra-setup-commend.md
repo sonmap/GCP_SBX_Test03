@@ -3344,19 +3344,35 @@ gcloud builds submit --no-source --config=/tmp/check-registry.yaml \
 | 4-1-1 이 `PUBLIC_EGRESS` 인데도 시간 초과 | 네트워크 담당자에게 `registry.terraform.io` · `releases.hashicorp.com` HTTPS 송신 허용 요청 |
 
 
-**State 확인**
+**State 확인 (2차 배포 후에만 · 지금은 건너뜀)**
+
+> 지금 단계에서는 **실행하지 않습니다.** Infrastructure Manager 배포는 2차 배포(과제 요청)를 해야 생깁니다. 지금 실행하면 목록이 비어 있는 것이 정상입니다.
+> 과제를 배포한 뒤 State 가 저장됐는지 볼 때 `TASK_NAME` 만 바꿔 실행합니다.
 
 ```bash
 # 실행 위치: infra-son01 | 대상: gcp-sbx-gke01 | 실행 계정: user01@sonmap.net
 export SBX_GKE_PROJECT="gcp-sbx-gke01"
 export REGION="asia-northeast3"
 export ADMIN_ACCOUNT="user01@sonmap.net"
+export TASK_NAME="task01"   # 요청 JSON 의 task.name (예: task01 · task11 · task21)
+# ① 이 과제의 배포 목록 (단계마다 1개)
 gcloud infra-manager deployments list --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
-  --filter="labels.task=<과제>" --format="table(name.basename(),state,latestRevision.basename())" \
+  --filter="labels.task=${TASK_NAME}" --format="table(name.basename(),state,labels.stage,latestRevision.basename())" \
   --account="${ADMIN_ACCOUNT}"
-gcloud infra-manager deployments export-statefile \
-  "projects/${SBX_GKE_PROJECT}/locations/${REGION}/deployments/<배포 이름>" --account="${ADMIN_ACCOUNT}"
+# ② workload 단계 State 내려받기 (목록이 비어 있으면 건너뜀)
+export DEPLOYMENT_NAME="$(gcloud infra-manager deployments list --project="${SBX_GKE_PROJECT}" --location="${REGION}" \
+  --filter="labels.task=${TASK_NAME} AND labels.stage=workload" --format="value(name.basename())" \
+  --account="${ADMIN_ACCOUNT}" | head -n1)"
+echo "DEPLOYMENT_NAME=${DEPLOYMENT_NAME}"
+[ -n "${DEPLOYMENT_NAME}" ] && gcloud infra-manager deployments export-statefile \
+  "projects/${SBX_GKE_PROJECT}/locations/${REGION}/deployments/${DEPLOYMENT_NAME}" --account="${ADMIN_ACCOUNT}"
 ```
+
+| 결과 | 의미 |
+|---|---|
+| `Listed 0 items.` · `DEPLOYMENT_NAME=` 비어 있음 | 아직 배포 안 됨 (지금은 정상) |
+| 단계별 배포가 `ACTIVE` | 배포 완료 · State 저장됨 |
+| `FAILED` | 2차 배포 문서의 실패 확인 절차로 |
 
 ### 4-2. 정적 PV 용 StorageClass
 
